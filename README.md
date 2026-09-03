@@ -264,11 +264,56 @@ kills the original dataset as a coverage lever: `itzzomkar/ev-adoption-behavior-
 (10,000 rows, exact schema match, the source of the synthetic data) could newly cover **82 test
 rows**.
 
+### Phase 1d — closing the single-model recipe (2026-09-02)
+
+Strict twins of D4. **Champion: E1, OOF 0.945642 → public 0.94586.**
+
+| probe | change | Δ vs D4 | verdict |
+|---|---|---|---|
+| **E1** | + neighborhood backoff | **+0.000205** | ships |
+| E2 | `te_smooth` 5 → 2 | +0.000117 | clears, but see below |
+| **E3** | TE averaged over 4 inner splits | **−0.000019** | **null** |
+
+**The encoder and capacity axes are orthogonal, as hypothesised.** The backoff was worth +0.000177
+on C2 and the capacity drop +0.000212; combined in E1 they give +0.000417 against C2, versus
++0.000389 predicted from the parts. Unlike the three encoder fixes, these stack.
+
+**E3 is the important negative, because it was the headline prediction.** The reframe below said the
+competition had become a variance problem, and the most direct variance lever — cancelling the
+arbitrary choice of which 4/5 of a fold builds each training row's encoding — bought **nothing**.
+Mechanism: at ~50 rows per income value, the encoding is already stable across inner draws, so
+there was little variance there to cancel. One prediction of the reframe has now failed; the
+remaining variance levers (in-fold seed bagging, multi-learner ensembling) are untested, so the
+reframe is **weakened but not refuted**, and the next probes are the ones that settle it.
+
 ### What this reframes the competition into
 
-Signal discovery is done. The lookup is extracted, cross-feature structure is absent, interactions
-are worth nothing, and the rare tail is negligible. What separates the current 0.945402 from the
-public top 0.94644 is almost certainly **estimation variance, not missing signal** — which is
-consistent with every capacity result pointing downward (255 leaves −0.000894; 15 and 7 leaves both
-positive) and with the generator being additive. The remaining levers are therefore variance
-reduction: TE inner-split averaging, seed bagging, lower capacity, and a multi-learner ensemble.
+Signal discovery looks finished. The lookup is extracted, cross-feature structure is absent,
+interactions are worth +0.000033, and the rare tail is negligible. Every capacity result points
+downward (255 leaves −0.000894; 15, 7 and 3 leaves all exactly +0.000212). The reading is that what
+separates 0.945642 from the public top is **estimation variance, not missing signal**.
+
+**Status of that reading: one prediction tested, one prediction failed (E3).** Treat it as a
+hypothesis under test, not a conclusion. It is settled by:
+- in-fold seed bagging (`seed_bag`) — averaging several models per fold,
+- a multi-learner stack (XGBoost, CatBoost) — whether a fitted combiner can subtract correlated
+  error here the way it did in S6E8.
+
+If both also come back null, the reading is wrong and the remaining gap is signal we have not
+found — in which case the honest move is to say so rather than keep tuning.
+
+### The OOF↔LB instrument, 5 paired points
+
+| run | OOF | public LB | offset |
+|---|---|---|---|
+| A0 | 0.941660 | 0.94149 | −0.000170 |
+| B5 | 0.944738 | 0.94511 | +0.000372 |
+| C2 | 0.945225 | 0.94549 | +0.000265 |
+| D4 | 0.945437 | 0.94566 | +0.000223 |
+| E1 | 0.945642 | 0.94586 | +0.000218 |
+
+**Spearman = 1.0000, slope 1.12, residual σ 0.000122** — and that σ is essentially the public
+split's own paired bootstrap SD (0.000116), which is the ideal result: the residual is split noise,
+so the OOF is an unbiased ranker. Still provisional at 5 points; the gate stays at the interim
++0.0001 until ~10. **The offset is not a trend** — its range across these five is 0.000542 against a
+0.000116 paired SD, and playbook §5 is the post-mortem of reading exactly this kind of series.

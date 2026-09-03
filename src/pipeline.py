@@ -58,6 +58,7 @@ DEFAULTS = {
     "run_tag": "baseline",
     "learner": "lgb",                # lgb | xgb | cat | glm
     "model_seed": SEED,
+    "seed_bag": 1,                   # average predictions over this many model seeds per fold
     "n_folds": N_FOLDS,
     "cv_seed": CV_SEED,
 
@@ -323,7 +324,17 @@ def main():
                                   cfg["cv_seed"] + f)
 
         n_model_features = Xtr.shape[1]
-        pv, pt, bi = fit_predict(cfg, Xtr, ytr, Xva, yva, Xte, feats_cat)
+        # Seed-bagging INSIDE a fold averages several models trained on the same rows,
+        # which cancels the fitting randomness (feature/row subsampling, tie-breaking)
+        # without touching the split. Playbook s6: this is the one seed manipulation that
+        # paid in S6E7 -- re-running at a new OUTER SPLIT seed is the one that did not,
+        # because test predictions are already averaged over the 5 fold-models.
+        bag = max(1, int(cfg["seed_bag"]))
+        pv = np.zeros(len(Xva)); pt = np.zeros(len(Xte)); bi = 0
+        for b in range(bag):
+            c = {**cfg, "model_seed": cfg["model_seed"] + 100 * b}
+            a, t_, i_ = fit_predict(c, Xtr, ytr, Xva, yva, Xte, feats_cat)
+            pv += a / bag; pt += t_ / bag; bi = max(bi, i_)
         oof[j], fold_id[j] = pv, f
         test_proba += pt / cfg["n_folds"]
         fold_aucs.append(roc_auc_score(yva, pv))
