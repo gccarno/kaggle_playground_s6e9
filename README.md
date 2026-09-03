@@ -207,6 +207,68 @@ per-value encoding, not shape and not interaction.**
 
 ### Phase 0 — orientation (2026-09-02)
 
-Data downloaded and profiled; LightGBM raw baseline at OOF **0.941642**; GLM structural probe
-established that the generator is additive-in-logit (§6). Repo scaffolding ported from S6E8. No
-submission yet.
+Data downloaded and profiled; LightGBM raw baseline at OOF **0.941660** → public **0.94149**;
+repo scaffolding ported from S6E8. The numbers on the wall measured (§4). The GLM probe established
+that the generator is additive in log-odds — and produced one wrong conclusion, corrected below.
+
+### Phase 1 — the lookup table (2026-09-02)
+
+Eight strict twins of A0. **Champion moved to B5, OOF 0.944738 → public 0.94511.** The mechanism
+and the correction to Phase 0 are in §6. Two large results (B4 +0.003017, B6 −0.001472) and four
+clean nulls (B1, B2, B3 all inside the noise floor; B7 −0.000894).
+
+The three negatives cohere rather than being three unrelated nulls: interactions are worth
++0.000033, so raising capacity to 255 leaves **costs** 0.000894 by fitting interactions that are not
+there. The generator is additive with a lookup inside it.
+
+### Phase 1b/1c — squeezing the encoder (2026-09-02)
+
+Twins of B5, then of C2. Champion: **D2, OOF 0.945402** (TE of the 3 numerics, `te_smooth=5`,
+neighborhood backoff). C2 submitted: OOF 0.945225 → public **0.94549**.
+
+| probe | change | Δ vs its baseline |
+|---|---|---|
+| C1 | neighborhood backoff (on B5) | +0.000428 |
+| C2 | `te_smooth` 20 → 5 (on B5) | +0.000487 |
+| C3 | `te_smooth` 20 → 100 (on B5) | −0.000667 |
+| C4 | value-count feature (on B5) | +0.000456 |
+| C5 / C6 | 15 / 7 leaves (on B5) | +0.000212 / +0.000268 |
+| C7 | TE on all 7 numerics (on B5) | −0.000075 |
+| D1 | `te_smooth` 5 → 2 (on C2) | +0.000123 |
+| D2 | neighborhood backoff (on C2) | +0.000177 |
+| D3 | value-count feature (on C2) | +0.000052 |
+
+**The redundancy was predicted and confirmed.** C1, C2 and C4 are three routes to the same problem
+— an unreliable rare-value estimate — so stacking them shrinks each one's delta: the backoff was
+worth +0.000428 on B5 and +0.000177 on C2; the count feature +0.000456 on B5 and +0.000052 on C2,
+which drops it below the gate. Only one of the three ships.
+
+### The two structural negatives that close the encoder axis
+
+Both computed on C2's OOF residuals, with a random-key control landing at 0.99 as it should.
+
+**1. The lookup is fully extracted.** Per-key residual variance, as a ratio to what a correct model
+would produce: `Annual_Income_USD` 0.846, `Daily_Commute_km` 0.876, `Age` 0.680 — all *below* 1.0.
+(Below rather than at 1.0 because an OOF prediction for value *v* is built from other folds' rows of
+*v*, which anticorrelates the error with the realized rate.) There is no per-value signal left.
+
+**2. There is no cross-feature lookup.** Nine joint keys tested; eight land between 0.85 and 0.95.
+The one exception, `Annual_Income_USD × Environmental_Concern_Level` at 1.074, is ≈2σ on 300 keys
+and is the largest of nine tests — that is selection, not signal, and playbook §5 exists to stop it
+being written up as a finding.
+
+**3. The rare-value tail is not where the gap lives.** Only **0.58%** of test rows carry an income
+value unseen in train, and only 2.3% land on a value seen fewer than 10 times. This is why the
+encoder fixes are worth ~0.0002 rather than ~0.002 — they only touch a few percent of rows. It also
+kills the original dataset as a coverage lever: `itzzomkar/ev-adoption-behavior-and-range-anxiety`
+(10,000 rows, exact schema match, the source of the synthetic data) could newly cover **82 test
+rows**.
+
+### What this reframes the competition into
+
+Signal discovery is done. The lookup is extracted, cross-feature structure is absent, interactions
+are worth nothing, and the rare tail is negligible. What separates the current 0.945402 from the
+public top 0.94644 is almost certainly **estimation variance, not missing signal** — which is
+consistent with every capacity result pointing downward (255 leaves −0.000894; 15 and 7 leaves both
+positive) and with the generator being additive. The remaining levers are therefore variance
+reduction: TE inner-split averaging, seed bagging, lower capacity, and a multi-learner ensemble.

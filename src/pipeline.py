@@ -69,6 +69,7 @@ DEFAULTS = {
     "te_cols": [],                   # SUPERVISED per-value target encoding (fold-fit)
     "te_smooth": 20.0,               # additive smoothing toward the backoff target
     "te_inner_folds": 5,             # inner K-fold used for the training rows' own TE
+    "te_inner_repeats": 1,           # average the inner-fold TE over this many splits
     "te_backoff": "prior",           # "prior" | "neighborhood" -- what a rare value falls back to
     "te_backoff_bins": 200,          # quantile bins defining a neighborhood (fold-fit)
     "te_backoff_smooth": 50.0,       # smoothing of the neighborhood level toward the prior
@@ -174,7 +175,6 @@ def apply_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
     lookup is invisible to any model that reads the value as a magnitude.
     """
     prior = float(ytr.mean())
-    inner = StratifiedKFold(cfg["te_inner_folds"], shuffle=True, random_state=rng_seed)
     new_cols = []
     for c in cols:
         name = f"te_{c}"
@@ -189,14 +189,25 @@ def apply_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
             bva = pd.Series(np.searchsorted(edges, Xva[c].values), index=Xva.index)
             bte = pd.Series(np.searchsorted(edges, Xte[c].values), index=Xte.index)
 
-        enc_tr = np.full(len(Xtr), prior, dtype=np.float64)
+        # The inner-fold TE a training row receives is itself noisy: it is built from
+        # 4/5 of the fold, and WHICH 4/5 is an arbitrary draw. Averaging over several
+        # independent inner splits cancels that draw without touching the leakage
+        # property -- every split still excludes the row's own label from its encoding.
+        # Pure variance reduction, which is what an additive generator rewards.
+        enc_tr = np.zeros(len(Xtr), dtype=np.float64)
         cnt_tr = np.zeros(len(Xtr), dtype=np.float64)
-        for i, j in inner.split(Xtr, ytr):
-            e, n, br = _fit_encoder(Xtr[c].iloc[i].values, ytr[i],
-                                    None if btr is None else btr.iloc[i], cfg, prior)
-            fb = prior if br is None else btr.iloc[j].map(br).fillna(prior).values
-            enc_tr[j] = Xtr[c].iloc[j].map(e).fillna(pd.Series(fb, index=Xtr.index[j])).values
-            cnt_tr[j] = Xtr[c].iloc[j].map(n).fillna(0.0).values
+        reps = max(1, int(cfg["te_inner_repeats"]))
+        for rep in range(reps):
+            inner = StratifiedKFold(cfg["te_inner_folds"], shuffle=True,
+                                    random_state=rng_seed + 1000 * rep)
+            for i, j in inner.split(Xtr, ytr):
+                e, n, br = _fit_encoder(Xtr[c].iloc[i].values, ytr[i],
+                                        None if btr is None else btr.iloc[i], cfg, prior)
+                fb = (pd.Series(prior, index=Xtr.index[j]) if br is None
+                      else btr.iloc[j].map(br).fillna(prior))
+                enc_tr[j] += Xtr[c].iloc[j].map(e).fillna(fb).values / reps
+                if rep == 0:
+                    cnt_tr[j] = Xtr[c].iloc[j].map(n).fillna(0.0).values
         Xtr[name] = enc_tr
 
         e, n, br = _fit_encoder(Xtr[c].values, ytr, btr, cfg, prior)
