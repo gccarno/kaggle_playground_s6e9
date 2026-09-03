@@ -1,0 +1,20 @@
+# local copy of the competition data
+# re-downloadable: kaggle competitions download -c playground-series-s6e9 -p data --unzip
+data/
+# kaggle kernels output scratch
+.kaggle_output/
+__pycache__/
+*.pyc
+# per-run prediction artifacts (large CSVs; runs.csv stays tracked)
+experiments/preds/
+experiments/blends/
+experiments/singles/
+# auto-submit queue state + logs
+experiments/queue.json
+experiments/submit_log.csv
+experiments/.submit_queue.lock
+logs/
+# pytorch_tabular / lightning run debris
+lightning_logs/
+saved_models/
+.pt_tmp/
