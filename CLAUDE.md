@@ -28,11 +28,17 @@ Three things reshape the workflow relative to S6E8, and each has a consequence:
    kernels are for GPU/neural legs and for the champion's reproducible record — not for screening.
    A probe that would have cost a kernel cycle in S6E8 costs less than a minute here, so the
    binding constraint is thinking, not compute. Run more probes.
-2. **The generator is additive in log-odds.** Measured, not assumed: a plain additive GLM reaches
-   OOF 0.938402, and adding all 28 pairwise interactions among the 8 strong drivers moves it to
-   0.938435 — **+0.000033, i.e. nothing**. LightGBM's +0.0032 over the GLM is per-feature *shape*,
-   not interaction. **Do not spend time on interaction search.** Spend it on response shapes:
-   per-value target encoding, splines, monotone constraints, calibrated ordinal codings.
+2. **The generator is additive in log-odds, and its strongest column is a lookup table.**
+   Two separate measured facts, and they point in different directions — do not collapse them.
+   *(a)* A plain additive GLM reaches OOF 0.938402 and adding all 28 pairwise interactions among the
+   8 strong drivers moves it to 0.938435 — **+0.000033, nothing**. So **interaction search is
+   crossed off.** *(b)* But `Annual_Income_USD` is a **value→target lookup table**: after the best
+   possible monotone fit, per-value residual rate SD is 0.0748 against 0.0284 expected from binomial
+   noise. Per-value target encoding of that one column is worth **+0.0030 OOF**; a monotone
+   constraint on it costs **−0.0015**. **The lever is per-value encoding.** This is S6E8's mechanism
+   recurring (playbook §7) — a model that reads an integer code as a *magnitude* cannot see a
+   non-monotonic lookup, whatever its capacity. Phase 0's GLM probe was blind to it for exactly that
+   reason, and the "the lever is smooth response shape" conclusion it produced was wrong.
 3. **There is real headroom.** The raw baseline is 0.94164 against a public top of 0.94644 — a
    0.0048 gap, roughly forty times S6E8's residual σ. Unlike S6E8, the early state of this
    competition is *not* "the signal is exhausted"; assume there is modelling to do until measurement

@@ -67,8 +67,12 @@ DEFAULTS = {
     "fe_clip_flags": False,          # income==30000 / commute==5.0 censoring indicators
     "fe_log_income": False,          # log(Annual_Income_USD) alongside the raw column
     "te_cols": [],                   # SUPERVISED per-value target encoding (fold-fit)
-    "te_smooth": 20.0,               # additive smoothing toward the fold's prior
+    "te_smooth": 20.0,               # additive smoothing toward the backoff target
     "te_inner_folds": 5,             # inner K-fold used for the training rows' own TE
+    "te_backoff": "prior",           # "prior" | "neighborhood" -- what a rare value falls back to
+    "te_backoff_bins": 200,          # quantile bins defining a neighborhood (fold-fit)
+    "te_backoff_smooth": 50.0,       # smoothing of the neighborhood level toward the prior
+    "te_count_feature": False,       # also emit log1p(train-fold count) per encoded column
     "monotone_income": False,        # monotone increasing constraint on income
 
     "params": {
@@ -125,10 +129,36 @@ def base_features(train, test, cfg):
     return tr, te, feats_num, feats_cat
 
 
-def _te_map(values, y, prior, smooth):
-    """Smoothed per-value label rate. Supervised -- callers must pass a train-fold slice."""
-    g = pd.DataFrame({"v": values, "y": y}).groupby("v")["y"].agg(["sum", "count"])
-    return (g["sum"] + prior * smooth) / (g["count"] + smooth)
+def _te_stats(values, y):
+    """Per-value (sum, count). Supervised -- callers must pass a train-fold slice."""
+    return pd.DataFrame({"v": values, "y": y}).groupby("v")["y"].agg(["sum", "count"])
+
+
+def _fit_encoder(values, y, bins, cfg, prior):
+    """Build a value -> encoded-rate mapping, plus the backoff needed for unseen values.
+
+    Two backoff modes, and the difference is the whole point of the `te_backoff` knob:
+
+    "prior"        a rare value falls back to the fold's global positive rate (0.1746).
+    "neighborhood" a rare value falls back to the rate of its QUANTILE BIN first, and only
+                   the bin falls back to the global prior. For a lookup-table column this
+                   is strictly better: an income value seen 3 times should be shrunk toward
+                   the rate of nearby incomes, not toward the population average, because
+                   the column carries a real monotone trend UNDERNEATH the lookup
+                   (Spearman(value, rate) = 0.68) that the global prior throws away.
+    """
+    st = _te_stats(values, y)
+    if cfg["te_backoff"] == "neighborhood" and bins is not None:
+        bst = _te_stats(bins, y)
+        bin_rate = ((bst["sum"] + prior * cfg["te_backoff_smooth"]) /
+                    (bst["count"] + cfg["te_backoff_smooth"]))
+        # each value's backoff target is its own bin's smoothed rate
+        vbin = pd.Series(bins.values, index=values).groupby(level=0).first()
+        target = vbin.reindex(st.index).map(bin_rate).fillna(prior)
+    else:
+        bin_rate, target = None, pd.Series(prior, index=st.index)
+    enc = (st["sum"] + target * cfg["te_smooth"]) / (st["count"] + cfg["te_smooth"])
+    return enc, st["count"], bin_rate
 
 
 def apply_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
@@ -137,7 +167,11 @@ def apply_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
     Training rows get their encoding from an inner K-fold so a row never contributes to
     its own encoded value -- without this, a 13,214-value column like Annual_Income_USD
     memorizes the fold outright. Val and test rows use the full training-fold statistics.
-    Unseen values fall back to the training fold's prior.
+
+    Why this transform matters here (README.md section 6): after fitting the best possible
+    MONOTONE function of income, per-value residual rates still have SD 0.0748 against a
+    binomial expectation of 0.0284. The column is a value->target lookup table, and a
+    lookup is invisible to any model that reads the value as a magnitude.
     """
     prior = float(ytr.mean())
     inner = StratifiedKFold(cfg["te_inner_folds"], shuffle=True, random_state=rng_seed)
@@ -145,14 +179,38 @@ def apply_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
     for c in cols:
         name = f"te_{c}"
         new_cols.append(name)
+
+        # Quantile bin edges are fit on the TRAINING FOLD ONLY, per the leakage rule.
+        btr = bva = bte = None
+        if cfg["te_backoff"] == "neighborhood":
+            edges = np.unique(np.quantile(Xtr[c].values,
+                                          np.linspace(0, 1, cfg["te_backoff_bins"] + 1)))
+            btr = pd.Series(np.searchsorted(edges, Xtr[c].values), index=Xtr.index)
+            bva = pd.Series(np.searchsorted(edges, Xva[c].values), index=Xva.index)
+            bte = pd.Series(np.searchsorted(edges, Xte[c].values), index=Xte.index)
+
         enc_tr = np.full(len(Xtr), prior, dtype=np.float64)
+        cnt_tr = np.zeros(len(Xtr), dtype=np.float64)
         for i, j in inner.split(Xtr, ytr):
-            m = _te_map(Xtr[c].iloc[i].values, ytr[i], prior, cfg["te_smooth"])
-            enc_tr[j] = Xtr[c].iloc[j].map(m).fillna(prior).values
+            e, n, br = _fit_encoder(Xtr[c].iloc[i].values, ytr[i],
+                                    None if btr is None else btr.iloc[i], cfg, prior)
+            fb = prior if br is None else btr.iloc[j].map(br).fillna(prior).values
+            enc_tr[j] = Xtr[c].iloc[j].map(e).fillna(pd.Series(fb, index=Xtr.index[j])).values
+            cnt_tr[j] = Xtr[c].iloc[j].map(n).fillna(0.0).values
         Xtr[name] = enc_tr
-        full = _te_map(Xtr[c].values, ytr, prior, cfg["te_smooth"])
-        Xva[name] = Xva[c].map(full).fillna(prior).values
-        Xte[name] = Xte[c].map(full).fillna(prior).values
+
+        e, n, br = _fit_encoder(Xtr[c].values, ytr, btr, cfg, prior)
+        for X, b in ((Xva, bva), (Xte, bte)):
+            fb = prior if br is None else b.map(br).fillna(prior)
+            X[name] = X[c].map(e).fillna(pd.Series(fb, index=X.index) if br is not None
+                                        else prior).values
+
+        if cfg["te_count_feature"]:
+            cname = f"cnt_{c}"
+            new_cols.append(cname)
+            Xtr[cname] = np.log1p(cnt_tr)
+            Xva[cname] = np.log1p(Xva[c].map(n).fillna(0.0).values)
+            Xte[cname] = np.log1p(Xte[c].map(n).fillna(0.0).values)
     return new_cols
 
 
@@ -253,6 +311,7 @@ def main():
             apply_target_encoding(Xtr, ytr, Xva, Xte, cfg["te_cols"], cfg,
                                   cfg["cv_seed"] + f)
 
+        n_model_features = Xtr.shape[1]
         pv, pt, bi = fit_predict(cfg, Xtr, ytr, Xva, yva, Xte, feats_cat)
         oof[j], fold_id[j] = pv, f
         test_proba += pt / cfg["n_folds"]
@@ -283,7 +342,7 @@ def main():
         "fold_auc_mean": round(float(np.mean(fold_aucs)), 6),
         "fold_auc_std": round(float(np.std(fold_aucs)), 6),
         "fold_aucs": [round(a, 6) for a in fold_aucs], "best_iters": best_iters,
-        "n_features": len(feats), "n_folds": cfg["n_folds"], "cv_seed": cfg["cv_seed"],
+        "n_features": int(n_model_features), "n_folds": cfg["n_folds"], "cv_seed": cfg["cv_seed"],
         "model_seed": cfg["model_seed"], "te_cols": ",".join(cfg["te_cols"]),
         "engineered": engineered,
         "notebook_runtime_sec": round(time.time() - t0, 1),

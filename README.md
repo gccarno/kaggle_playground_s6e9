@@ -82,9 +82,7 @@ post-mortem of exactly that mistake.
 | OOF→LB residual σ | *unset* | same fit; **the shipping gate is ~1σ converted to OOF units** |
 
 Reproduce with `python scripts/split_resolution.py <runA> <runB>`. The public split is
-**assumed to be 20%** of the 286,571 test rows — the Playground Series default. Kaggle's pages are
-JS-rendered and could not be read programmatically to confirm it; revisit if a discussion thread
-states otherwise.
+**20%** of the 286,571 test rows — 57,314 public / 229,257 private. Confirmed 2026-09-02.
 
 **The single/paired distinction is the trap.** A single public score's own noise is 0.001078 — nine
 times the paired SD. So "we are 0.0005 behind rank 40" is *inside one score's noise* as an absolute
@@ -140,26 +138,50 @@ worth modelling).
 | `Number_of_Cars_Owned` | int 1–4 | 4 | 0.50625 | ~flat in logit — likely noise |
 | `Gender` | cat | 3 | 0.50461 | ~flat — likely noise |
 
-### The structural finding
+### The structural finding — corrected in Phase 1
 
-**The generator is close to additive in log-odds.** Measured in Phase 0:
+Phase 0 measured that the generator is **additive in log-odds**, and that part stands:
 
 | model | OOF AUC |
 |---|---|
-| Logistic regression, additive (log-income, splines-free, one-hots) | 0.938402 |
+| Logistic regression, additive (log-income, one-hots) | 0.938402 |
 | The same GLM **+ all 28 pairwise interactions among the 8 strong drivers** | 0.938435 |
-| LightGBM, raw features, default-ish | **0.941642** |
+| LightGBM, raw features | 0.941642 |
 
-Pairwise interactions bought **+0.000033** — nothing. So the GBDT's +0.0032 over the GLM is
-**per-feature nonlinear shape**, not interaction. `Environmental_Concern_Level` in logit units is
-`[-5.17, -3.82, -2.08, -1.11, +0.07]` — strongly non-linear steps; the income logit curve is
-non-monotone at its bottom because the 30000 clip mixes two populations.
+Pairwise interactions bought **+0.000033** — nothing. **Interaction search is crossed off.**
 
-**Consequence for the plan:** the lever is *recovering per-feature response shapes* (target/rate
-encoding, splines, monotone-constrained boosting), not interaction search. Cross this off before
-spending a week on it.
+Phase 0 then drew the wrong conclusion from that, namely that the remaining lever was smooth
+per-feature *shape*. Phase 1 refuted it. **`Annual_Income_USD` is a value→target lookup table, not
+a magnitude:**
 
----
+- After fitting the **best possible monotone function** of income (isotonic, weighted, on the 2,213
+  values with n≥100 covering 451,901 rows), the per-value residual rate SD is **0.0748** against a
+  binomial expectation of **0.0284**. Excess real per-value structure: **0.0685**.
+- Within the narrow 80k–90k window alone, 739 distinct values have rate SD 0.0858 vs 0.0321 expected.
+  `86095` (n=1082) sits at 0.199 while `96749` (n=1073) sits at 0.115.
+- Spearman(income value, per-value rate) is only **0.68** — a real monotone trend exists *underneath*
+  the lookup, which is why the backoff for rare values should be the local neighborhood, not the
+  global prior.
+- 13,214 distinct income values across 668,665 rows (≈50 rows/value); **86.2%** of test income values
+  appear in train, so the lookup transfers.
+
+The three probes that establish it, all strict twins of A0 (seed-noise floor 0.000038):
+
+| probe | change | OOF | Δ vs A0 |
+|---|---|---|---|
+| **B4** | per-value TE of `Annual_Income_USD` | 0.944677 | **+0.003017** |
+| **B6** | monotone-increasing constraint on income | 0.940188 | **−0.001472** |
+| B2 | `log(income)` added | 0.941660 | +0.000000 |
+
+B6 is the clincher: **forbidding non-monotonicity costs 39σ.** A constraint can only be that
+expensive if the thing it forbids is real signal. And B2 shows that a monotone *re-expression* of
+income buys exactly zero. So the signal lives in the value identity, and only a per-value encoding
+can see it.
+
+**This is S6E8's mechanism recurring** (playbook §7): *any model that reads an integer code as a
+magnitude cannot see a non-monotonic lookup, however much capacity it is given.* The Phase 0 GLM
+probe was blind to it for precisely that reason — it read income as a number. **The lever is
+per-value encoding, not shape and not interaction.**
 
 ## 7. Repo layout
 
