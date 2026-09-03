@@ -64,31 +64,52 @@ Spearman(OOF, private LB) = 0.9974 over 18 runs.
 
 ---
 
-## 4. The three numbers on the wall
+## 4. The numbers on the wall
 
-Set in Phase 0, then used for the rest of the competition. **Unset until measured — do not invent
-values earlier.**
+Measured in Phase 0 (2026-09-02). These set what counts as a result for the rest of the
+competition. **Do not re-derive them later from marginal LB deltas** — playbook §5 is the
+post-mortem of exactly that mistake.
 
 | number | value | how it was measured |
 |---|---|---|
-| OOF→LB slope | *unset* | regress LB on OOF over ≥10 paired runs |
-| OOF→LB residual σ | *unset* | same fit; **the gate is ~1σ converted to OOF units** |
-| Paired-bootstrap SD, public split | *unset* | paired bootstrap over our own OOF rows at the public split's row count |
-| Paired-bootstrap SD, private split | *unset* | same, at the private row count — this is the shakeup's room |
-| Seed-noise floor | *unset* | re-run one recipe at a new model seed; nothing below this is a result |
+| **Seed-noise floor** | **0.000038** OOF | sample SD of the A0 recipe's OOF AUC over 4 model seeds (42, 1337, 7, 2024): 0.941660 / 0.941656 / 0.941580 / 0.941610. **Nothing below this is a result.** |
+| **Paired ΔAUC SD, public split** | **0.000116** | paired bootstrap over our own OOF rows at 57,314 rows |
+| **Paired ΔAUC SD, private split** | **0.000055** | same, at 229,257 rows — **this is how much room the shakeup has** |
+| **Paired ΔAUC SD, full OOF** | **0.000034** | same, at 668,665 rows; agrees with the seed floor, as it should |
+| Single-score SD, public split | 0.001078 | bootstrap of one model's absolute AUC at 57,314 rows |
+| Single-score SD, private split | 0.000548 | same, at 229,257 rows |
+| OOF→LB slope | *unset* | needs ≥10 paired runs |
+| OOF→LB residual σ | *unset* | same fit; **the shipping gate is ~1σ converted to OOF units** |
 
-**Shipping gate: *unset* until the residual σ exists.** Until then, probes are logged but nothing is
-promoted to the champion recipe on a delta alone.
+Reproduce with `python scripts/split_resolution.py <runA> <runB>`. The public split is
+**assumed to be 20%** of the 286,571 test rows — the Playground Series default. Kaggle's pages are
+JS-rendered and could not be read programmatically to confirm it; revisit if a discussion thread
+states otherwise.
 
----
+**The single/paired distinction is the trap.** A single public score's own noise is 0.001078 — nine
+times the paired SD. So "we are 0.0005 behind rank 40" is *inside one score's noise* as an absolute
+statement and simultaneously a **4σ paired difference** against that specific opponent's
+predictions. Both are true. Always compare against a named opponent's predictions, never against a
+rank (playbook §8).
+
+**Interim shipping gate: +0.0001 OOF** — about 2.6× the seed-noise floor, and comfortably below the
+public split's paired resolution so that a passing probe is at least *potentially* visible. This is a
+placeholder derived from the noise floor alone; it is replaced by ~1σ of the OOF→LB residual as soon
+as ~10 paired runs exist.
 
 ## 5. The strategic decisions, made on day one
 
-**Artifact-sharing policy.** *Pending — to be written before the public leaderboard is tempting.*
-The choice is between "best model we can build" (every leg is one we trained) and "best score we can
-obtain" (public blend artifacts are legal and are what most of the field does). S6E8 chose the
-former, priced it at ~180 places, and the private split charged it in full. Whichever is chosen, it
-goes here in writing, with the price attached, before it matters.
+**Artifact-sharing policy — decided 2026-09-02: ours-only until week 3, then reassess.**
+Every leg shipped before 2026-09-21 is one we trained. Public notebooks may be *read* for ideas and
+attached as *diagnostics*, but no public submission or blend artifact enters a shipped model. On or
+about 2026-09-21 — once the OOF→LB instrument exists and the leaderboard's shape is known (§5,
+"read the shape") — the decision is reopened **once**, deliberately, with the price in places written
+down at that moment.
+
+*Risk accepted, on the record:* playbook §8 warns that drifting between "best model we can build"
+and "best score we can obtain" gets you the worst of both. The mitigation is that this is a single
+scheduled reassessment with a written trigger, not an open option to drift. If week 3 arrives and the
+decision is not made deliberately, the default is that the ours-only rule stands.
 
 **Local-first iteration.** A full 5-fold LightGBM on this data runs in **32 seconds** on local CPU.
 This is the single biggest operational difference from S6E8 (~5 min local / ~15 min per kernel

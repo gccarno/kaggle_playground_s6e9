@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Run s6e9-model.ipynb LOCALLY with a config override, archive its artifacts,
+"""Run src/pipeline.py LOCALLY with a config override, archive its artifacts,
 optionally submit the resulting file, and append a row to experiments/runs.csv.
 
-The local loop is ~5 minutes against ~15 for a kernel push/queue/run/collect cycle,
+The local loop is ~32 SECONDS against ~15 minutes for a kernel push/queue/run/collect cycle,
 and a locally-produced submission.csv can be submitted directly -- so probes are
 screened here and only champions get pushed to Kaggle for the reproducible record.
 
@@ -15,12 +15,12 @@ Usage:
 
 Rows land in the same experiments/runs.csv as kernel runs, with kernel_ref="local".
 """
-import argparse, importlib.util, json, os, shutil, subprocess, sys, uuid
+import argparse, importlib.util, json, os, re, shutil, subprocess, sys, uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-NOTEBOOK = REPO_ROOT / "s6e9-model.ipynb"
+PIPELINE = REPO_ROOT / "src" / "pipeline.py"
 
 # Reuse collect_run.py's log plumbing rather than reimplementing the schema logic.
 _spec = importlib.util.spec_from_file_location("collect_run", Path(__file__).with_name("collect_run.py"))
@@ -28,20 +28,17 @@ cr = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cr)
 
 def _load_defaults():
-    """Read DEFAULTS straight out of the notebook instead of mirroring it here.
+    """Import DEFAULTS straight out of src/pipeline.py instead of mirroring it here.
 
-    A hand-maintained copy drifted twice in one session, and the second time it made
-    --diff-vs compare against a baseline missing the very key the probe was changing,
-    so a genuine one-field twin was reported as "0 fields differ". Parsing the single
-    source of truth removes that whole class of bug."""
-    import ast, re
-    src = "".join(
-        "".join(c["source"]) for c in json.loads(NOTEBOOK.read_text(encoding="utf-8"))["cells"]
-        if c["cell_type"] == "code")
-    m = re.search(r"^DEFAULTS = (\{.*?^\})", src, re.S | re.M)
-    if not m:
-        raise RuntimeError("could not find a DEFAULTS literal in the notebook")
-    return ast.literal_eval(m.group(1))
+    A hand-maintained copy drifted twice in S6E8, and the second time it made --diff-vs
+    compare against a baseline missing the very key the probe was changing, so a genuine
+    one-field twin was reported as "0 fields differ". Importing the single source of
+    truth removes that whole class of bug. pipeline.py guards its main() so the import
+    is side-effect free."""
+    spec = importlib.util.spec_from_file_location("s6e9_pipeline", PIPELINE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.DEFAULTS
 
 
 DEFAULTS = _load_defaults()
@@ -71,27 +68,15 @@ def check_strict_twin(cfg, baseline):
           f"({a[diff[0]]!r} -> {b[diff[0]]!r})")
 
 
-def execute_notebook(cfg, out_dir):
-    """Run the notebook's code cells as a script in a child process, streaming output live.
+def execute_pipeline(cfg, out_dir):
+    """Run src/pipeline.py in a child process, streaming its output live.
 
-    Deliberately NOT nbclient: it buffers all cell output until execute() returns, so a
-    run that is interrupted (or merely slow) shows nothing at all -- three runs were lost
-    that way with zero diagnostic trace. The notebook stays the single source of truth;
-    only its code cells are extracted, in order, and run in one namespace, which is what
-    a notebook is anyway."""
-    nb = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
-    parts = ["import matplotlib\nmatplotlib.use('Agg')\n"]
-    for i, c in enumerate(nb["cells"]):
-        if c["cell_type"] == "code":
-            parts.append(f"\n# ---- cell {i} ----\n" + "".join(c["source"]) + "\n")
-
-    script = REPO_ROOT / ".kaggle_output" / f"_run_{out_dir.name}.py"
-    script.parent.mkdir(parents=True, exist_ok=True)
-    script.write_text("".join(parts), encoding="utf-8")
-
+    Deliberately a subprocess rather than an import: it guarantees a clean namespace per
+    probe (no leftover globals silently carrying between runs) and streams output as it
+    is produced, which an in-process capture does not."""
     env = dict(os.environ, S6E9_CFG=json.dumps(cfg), S6E9_OUT=str(out_dir),
                PYTHONUNBUFFERED="1")
-    proc = subprocess.Popen([sys.executable, "-u", str(script)], cwd=REPO_ROOT, env=env,
+    proc = subprocess.Popen([sys.executable, "-u", str(PIPELINE)], cwd=REPO_ROOT, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             bufsize=1)
     captured = []
@@ -99,13 +84,12 @@ def execute_notebook(cfg, out_dir):
         print(line, end="", flush=True)
         captured.append(line)
     if proc.wait() != 0:
-        raise RuntimeError(f"notebook script failed with exit code {proc.returncode}")
+        raise RuntimeError(f"pipeline failed with exit code {proc.returncode}")
 
     marker = "RUN_METRICS_JSON:"
     line = next((l for l in captured if l.startswith(marker)), None)
     if line is None:
-        raise RuntimeError("RUN_METRICS_JSON not found in notebook output")
-    script.unlink(missing_ok=True)
+        raise RuntimeError("RUN_METRICS_JSON not found in pipeline output")
     return json.loads(line[len(marker):])
 
 
@@ -136,7 +120,7 @@ def poll_score(competition="playground-series-s6e9", timeout_min=20, poll_interv
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--cfg", default="{}", help="JSON CFG override for the notebook")
+    ap.add_argument("--cfg", default="{}", help="JSON CFG override for src/pipeline.py")
     ap.add_argument("--description", required=True)
     ap.add_argument("--notes", default="", help="hypothesis / gate / mechanism -- write the gate BEFORE the result")
     ap.add_argument("--diff-vs", default=None, help="JSON baseline CFG; enforces a strict-twin (exactly one field differs)")
@@ -153,7 +137,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"run_id={run_id}  cfg={json.dumps(cfg)}\n")
 
-    metrics = execute_notebook(cfg, out_dir)
+    metrics = execute_pipeline(cfg, out_dir)
     print(f"\n{'='*70}\nOOF AUC = {metrics['final_oof_auc']}   ({metrics['n_features']} features)")
 
     score = ""
