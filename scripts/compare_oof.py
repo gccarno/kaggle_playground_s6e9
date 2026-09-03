@@ -35,8 +35,8 @@ TRAIN = REPO_ROOT / "data" / "train.csv"
 
 
 def load_truth():
-    tr = pd.read_csv(TRAIN, usecols=["id", "addicted_label"])
-    return tr["id"].to_numpy(), tr["addicted_label"].to_numpy()
+    tr = pd.read_csv(TRAIN, usecols=["id", "Will_Buy_EV"])
+    return tr["id"].to_numpy(), (tr["Will_Buy_EV"] == "Yes").astype(int).to_numpy()
 
 
 def load_oof(path, ids):

@@ -190,7 +190,7 @@ def main():
     orev = {v: k for k, v in ORPHANS.items()}
     onames = [orev[n.split(":")[0]] for n in onames]
 
-    y = truth["addicted_label"].to_numpy()
+    y = (truth["Will_Buy_EV"] == "Yes").astype(int).to_numpy()
     L, LO = to_logit(P), to_logit(PO)
     idx = {n: i for i, n in enumerate(names)}
     corr_table.y = y

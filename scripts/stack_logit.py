@@ -66,7 +66,13 @@ C_GRID = [0.1, 1.0]
 # with variance on an unseen split. Final B removes that step by defining its pool with a
 # threshold chosen once and applied without judgement, and by pinning C instead of picking
 # it. It is EXPECTED to score below Final A; that is what it is for.
-FIXED_RULE_MIN_SOLO = 0.965
+# S6E9: DELIBERATELY UNSET. In S6E8 this was 0.965, which was that competition's pool
+# floor; S6E9's legs live around 0.945, so carrying the number over would silently
+# select nothing. The whole point of Final B is a threshold chosen ONCE, on the record,
+# and applied without judgement -- so it is set when the pool actually exists, in
+# README.md, and not improvised at the deadline. Until then --pool fixed-rule refuses
+# to run rather than quietly producing a wrong pool.
+FIXED_RULE_MIN_SOLO = None
 FIXED_RULE_C = 0.1
 # A stack or blend is a combination of legs, so admitting one would count its members
 # twice. Both the tag and the artifact name are checked: the tag is what we write today,
@@ -82,6 +88,12 @@ def fixed_rule_legs():
     Mechanical by construction: the member list is derived from experiments/runs.csv and
     the experiments/preds/ inventory, never hand-typed, so re-running reproduces it.
     """
+    if FIXED_RULE_MIN_SOLO is None:
+        raise SystemExit(
+            "FIXED_RULE_MIN_SOLO is unset for S6E9. Final B's pool threshold must be "
+            "chosen once, deliberately, and written into README.md before it is used -- "
+            "see the comment at the top of this file. Use --runs or --pool curated "
+            "until then.")
     runs = pd.read_csv(REPO_ROOT / "experiments" / "runs.csv")
     keep = []
     for _, row in runs.iterrows():
@@ -103,7 +115,7 @@ def fixed_rule_legs():
 
 def load_legs(run_ids):
     """Returns (names, OOF matrix, TEST matrix, fold vector, test ids)."""
-    truth = pd.read_csv(REPO_ROOT / "data" / "train.csv", usecols=["id", "addicted_label"])
+    truth = pd.read_csv(REPO_ROOT / "data" / "train.csv", usecols=["id", "Will_Buy_EV"])
     names, O, T, folds, ids = [], [], [], None, None
     for r in run_ids:
         d = PREDS / r
@@ -145,7 +157,7 @@ def main():
                     help="run_ids under experiments/preds/ (default: the curated pool)")
     ap.add_argument("--pool", choices=("curated", "fixed-rule"), default="curated",
                     help="curated = the gated LEGS pool (Final A); "
-                         "fixed-rule = every leg with solo OOF >= 0.965, C pinned (Final B)")
+                         "fixed-rule = every leg with solo OOF >= FIXED_RULE_MIN_SOLO, C pinned (Final B)")
     ap.add_argument("--C", type=float, default=None,
                     help="pin the regularisation instead of searching C_GRID")
     ap.add_argument("--submit", action="store_true")
@@ -163,7 +175,7 @@ def main():
         runs = args.runs if args.runs is not None else list(LEGS.values())
 
     names, P, PT, folds, ids, truth = load_legs(runs)
-    y = truth["addicted_label"].to_numpy()
+    y = (truth["Will_Buy_EV"] == "Yes").astype(int).to_numpy()
     L = logit(np.clip(P, EPS, 1 - EPS))
     LT = logit(np.clip(PT, EPS, 1 - EPS))
     print(f"{len(names)} legs, {len(y):,} rows\n")
@@ -209,7 +221,7 @@ def main():
     pd.DataFrame({"id": truth["id"], "fold": folds, "proba": stack_oof}).to_csv(
         dest / "oof_proba_stack.csv", index=False)
     pd.DataFrame({"id": ids, "proba": test_pred}).to_csv(dest / "test_proba_stack.csv", index=False)
-    sub = pd.DataFrame({"id": ids, "addicted_label": test_pred})
+    sub = pd.DataFrame({"id": ids, "Will_Buy_EV": test_pred})
     sub.to_csv(dest / "submission.csv", index=False)
     (dest / "manifest.json").write_text(json.dumps(
         {"sources": [n.split(":")[0] for n in names], "learners": names, "C": C,
@@ -219,8 +231,8 @@ def main():
 
     ss = pd.read_csv(REPO_ROOT / "data" / "sample_submission.csv")
     assert len(sub) == len(ss) and (sub["id"].values == ss["id"].values).all()
-    assert sub["addicted_label"].notna().all() and sub["addicted_label"].between(0, 1).all()
-    assert sub["addicted_label"].nunique() > 1000, "degenerate predictions"
+    assert sub["Will_Buy_EV"].notna().all() and sub["Will_Buy_EV"].between(0, 1).all()
+    assert sub["Will_Buy_EV"].nunique() > 1000, "degenerate predictions"
     print(f"\nsubmission validated -> {dest / 'submission.csv'}")
 
     score = ""

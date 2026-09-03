@@ -25,36 +25,14 @@ from scipy.stats import rankdata
 from sklearn.metrics import roc_auc_score
 
 REPO = Path(__file__).resolve().parent.parent
-LEGS = {"B6": "f64e2781", "B7": "6e3dd7c3", "B8": "9e68c7ce", "B10x": "7ebde432",
-        "C1": "6a091632", "C2": "5daf6c12", "C3x": "0c32463c", "C4x": "fdeaa047",
-        "D1cat": "7c1e9334", "E1mlp": "2fb89920", "E2emb": "8bd89dee",
-        "F1real": "53c678f6", "G1ftt": "b2f35b4a",
-        # newly admitted: the T4 reruns (permitted -- not treated as seed bagging) and
-        # NODE, which is the only leg roughly equidistant from BOTH the tree and neural
-        # axes (3.427% vs trees, 3.245% vs neural) and so is excluded from the 0.965
-        # screening rule on purpose -- that rule was derived from three unrelated legs.
-        "K1real": "cd2dbce4", "K2ftt": "46859c68", "K4node": "976c2703",
-        # Phase 2. The composition legs carry the generator's budget constraint, which
-        # cleared on all three tree engines at 5-6x the gate; L1lookupt is the
-        # Lookup-Transformer, the first leg here that is BOTH the strongest solo and the
-        # most decorrelated (max corr 0.9796 against a pack whose own median max-corr is
-        # 0.9941), which is the counter-example to the section 6 wall.
-        "B2xgb": "f047412f", "B2blgb": "7d1de67e", "B2ccat": "e73f6257",
-        "L1lookupt": "dada9e2d", "M1tabm": "f1d249bd", "B3imp": "54db2990",
-        # Phase 4. R1mnca is Final A's 23rd leg (7f69fcf6, OOF 0.969434, LB 0.97060).
-        # It was left out of this dict when it was run, so every gate-2 measurement
-        # since Phase 4 has been taken against a 22-leg pool that is NOT what shipped.
-        "R1mnca": "9107a864"}
-# G2/K3 TabTransformer (0.9533) and E3 raw-MLP (0.9405) stay out. The original reason given
-# here -- "measured strictly harmful" -- was measured under an EQUAL-WEIGHT MEAN, where a weak
-# leg can only dilute; it is not evidence about a fitted combiner, which can subtract. They
-# have since been re-measured under the fitted logit stack by scripts/leg_diversity.py, along
-# with the other six Phase 1 orphans, and they still do not belong: G2 and K3 each contribute
-# -0.000001 and E3 +0.000008, all nine together +0.000047, a quarter of the gate. K3 is worth
-# singling out because it has max corr 0.9251 against a pool whose median is 0.9947 -- the most
-# decorrelated leg we own, contributing nothing. Decorrelation is not sufficient; strength is
-# the binding constraint. Keeping them out ALSO keeps this search tractable: each leg doubles it.
-CHAMPION = ["B10x", "C4x", "D1cat", "E2emb", "F1real"]   # Final A, ffb65555, LB 0.96892
+# The pool lives in experiments/pool.json and is read through scripts/pool.py. S6E8 kept
+# it as a literal dict in this file and paid for it: its own comment records that Final
+# A's 23rd leg "was left out of this dict when it was run, so every gate-2 measurement
+# since Phase 4 has been taken against a 22-leg pool that is NOT what shipped."
+from pool import legs as _pool_legs
+
+LEGS = _pool_legs()
+CHAMPION = sorted(LEGS)          # the full pool until a champion subset is chosen
 GATE = 0.0002
 
 
@@ -79,7 +57,7 @@ def fast_auc(y, s):
 
 def main():
     y = pd.read_csv(REPO / "data" / "train.csv",
-                    usecols=["addicted_label"]).addicted_label.to_numpy()
+                    usecols=["Will_Buy_EV"]).Will_Buy_EV.eq("Yes").astype(int).to_numpy()
     names, cols, folds = [], [], None
     for n, r in LEGS.items():
         f = glob.glob(str(REPO / "experiments" / "preds" / r / "oof_proba_*.csv"))

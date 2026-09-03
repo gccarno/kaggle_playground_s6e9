@@ -35,7 +35,7 @@ GATE = 0.0002
 
 def score(run_ids):
     _, P, _, folds, _, truth = load_legs(run_ids)
-    y = truth["addicted_label"].to_numpy()
+    y = (truth["Will_Buy_EV"] == "Yes").astype(int).to_numpy()
     L = logit(np.clip(P, EPS, 1 - EPS))
     return roc_auc_score(y, honest_oof(L, y, folds, STACK_C))
 

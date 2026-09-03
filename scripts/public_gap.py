@@ -40,14 +40,16 @@ from sklearn.preprocessing import StandardScaler
 
 from stack_logit import honest_oof
 from subset_ceiling import LEGS
+from pool import pool_floor
 
 REPO = Path(__file__).resolve().parent.parent
 LIB = REPO / "experiments" / "public_lib"
 EPS = 1e-6
+SOLO_FLOOR = pool_floor()   # this competition's pool floor, not S6E8's 0.9650
 
 
 def load_ours():
-    truth = pd.read_csv(REPO / "data" / "train.csv", usecols=["id", "addicted_label"])
+    truth = pd.read_csv(REPO / "data" / "train.csv", usecols=["id", "Will_Buy_EV"])
     names, O, folds = [], [], None
     for n, r in LEGS.items():
         f = sorted(glob.glob(str(REPO / "experiments" / "preds" / r / "oof_proba_*.csv")))
@@ -60,7 +62,7 @@ def load_ours():
             assert (d.fold.to_numpy() == folds).all(), f"{n}: different CV partition"
         names.append(n)
         O.append(d.proba.to_numpy())
-    return truth.addicted_label.to_numpy(), names, np.column_stack(O), folds
+    return (truth.Will_Buy_EV == "Yes").astype(int).to_numpy(), names, np.column_stack(O), folds
 
 
 def load_public(n_rows):
@@ -114,7 +116,7 @@ def main():
         c = np.abs([np.corrcoef(Lp[:, j], Lo[:, i])[0, 1] for i in range(Lo.shape[1])])
         rows.append((n, roc_auc_score(y, PUB[:, j]), c.max(), our_names[int(c.argmax())]))
     t = pd.DataFrame(rows, columns=["member", "solo", "max_corr_vs_ours", "nearest_leg"])
-    strong = t[t.solo >= 0.9650].sort_values("max_corr_vs_ours")
+    strong = t[t.solo >= SOLO_FLOOR].sort_values("max_corr_vs_ours")
     print(t.sort_values("solo", ascending=False).head(5)
           .to_string(index=False, float_format="%.4f"))
     print("\n  most decorrelated among members at solo >= 0.9650:")

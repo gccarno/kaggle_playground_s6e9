@@ -24,9 +24,10 @@ from sklearn.linear_model import LogisticRegression
 
 from stack_logit import EPS, PREDS, REPO_ROOT, honest_oof, load_legs
 from subset_ceiling import LEGS
+from pool import pool_floor, champion_oof, stack_C as _stack_C
 
-STACK_C = 0.1          # the shipped stack's C, so the delta is comparable to 7f69fcf6
-SHIPPED = 0.969434     # 7f69fcf6, 23 legs, LB 0.97060 -- Final A
+STACK_C = _stack_C()   # the shipped stack's C, so the delta is comparable to it
+SHIPPED = champion_oof()
 
 
 def main():
@@ -50,13 +51,14 @@ def main():
     # assert against (load_legs needs >= 2 legs anyway).
     _, P2, _, folds2, _, _ = load_legs([args.run_id] + list(LEGS.values()))
     assert (folds2 == folds).all(), "probe is on a DIFFERENT CV partition"
-    y = truth["addicted_label"].to_numpy()
+    y = (truth["Will_Buy_EV"] == "Yes").astype(int).to_numpy()
 
     L = logit(np.clip(P, EPS, 1 - EPS))            # the 22-leg pool
     lp = logit(np.clip(P2[:, 0], EPS, 1 - EPS))    # the probe
     label = args.name or args.run_id
 
     solo = roc_auc_score(y, lp)
+    floor = pool_floor()
     c = np.array([np.corrcoef(lp, L[:, k])[0, 1] for k in range(L.shape[1])])
     j = int(c.argmax())
     CC = np.corrcoef(L.T)
@@ -75,20 +77,23 @@ def main():
 
     print(f"\n{'':<22}{'value':>12}{'gate':>12}{'verdict':>10}")
     print("-" * 56)
-    print(f"{'solo OOF':<22}{solo:>12.6f}{0.9655:>12.4f}"
-          f"{('PASS' if solo >= 0.9655 else 'miss'):>10}")
+    # S6E8's 0.9655 solo floor does not transfer -- S6E9's legs live around 0.945. Show
+    # the leg's solo score against the CURRENT pool's own floor, computed from runs.csv,
+    # rather than against a constant carried over from another competition.
+    print(f"{'solo OOF':<22}{solo:>12.6f}{floor:>12.4f}"
+          f"{('PASS' if solo >= floor else 'miss'):>10}")
     print(f"{'max |corr| vs pool':<22}{c[j]:>12.4f}{'':>12}{'  vs ' + names[j]:>10}")
     print(f"{'  pool median max-corr':<22}{pool_med:>12.4f}")
     if "L1lookupt" in names:
         print(f"{'  corr vs L1lookupt':<22}{c[names.index('L1lookupt')]:>12.4f}")
     print(f"{'|weight| rank in stack':<22}{rank:>9} of {len(w)}")
     print("-" * 56)
-    print(f"{'23-leg stack (shipped)':<22}{base:>12.6f}")
-    print(f"{'24-leg stack':<22}{with_it:>12.6f}")
+    print(f"{f'{L.shape[1]}-leg stack (pool)':<22}{base:>12.6f}")
+    print(f"{f'{L.shape[1]+1}-leg stack':<22}{with_it:>12.6f}")
     d = with_it - base
     print(f"{'CONTRIBUTION':<22}{d:>+12.6f}{args.gate:>12.4f}"
           f"{('CLEARS' if d >= args.gate else 'MISS'):>10}")
-    if abs(base - SHIPPED) > 5e-6:
+    if SHIPPED is not None and abs(base - SHIPPED) > 5e-6:
         print(f"\nnote: recomputed base {base:.6f} vs the logged {SHIPPED:.6f}")
     verdict = ("gate 2 CLEARED -- this is submittable" if d >= args.gate
                else "misses gate 2. Nothing ships. Record the mechanism.")
