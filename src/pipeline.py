@@ -56,7 +56,7 @@ RAW_NUM = ["Age", "Annual_Income_USD", "Daily_Commute_km", "Number_of_Cars_Owned
 # ---------------------------------------------------------------------- config
 DEFAULTS = {
     "run_tag": "baseline",
-    "learner": "lgb",                # lgb | xgb | cat | glm
+    "learner": "lgb",                # lgb | xgb | cat | glm | emb
     "model_seed": SEED,
     "seed_bag": 1,                   # average predictions over this many model seeds per fold
     "n_folds": N_FOLDS,
@@ -76,6 +76,17 @@ DEFAULTS = {
     "te_backoff_smooth": 50.0,       # smoothing of the neighborhood level toward the prior
     "te_count_feature": False,       # also emit log1p(train-fold count) per encoded column
     "monotone_income": False,        # monotone increasing constraint on income
+    # -- "emb" learner only: value identity as a LEARNED EMBEDDING.
+    "emb_cols": ["Annual_Income_USD", "Daily_Commute_km", "Age"],
+    "emb_dim": 16,                   # embedding width per token column
+    "emb_min_count": 5,              # train-fold count below which a value maps to OOV
+    "emb_hidden": [256, 128],
+    "emb_dropout": 0.1,
+    "emb_lr": 1e-3,
+    "emb_batch": 4096,
+    "emb_epochs": 40,
+    "emb_patience": 5,
+
     "cat_cols": [],                  # columns ALSO handed to the learner as native
                                      # high-cardinality categoricals (see base_features)
 
@@ -294,6 +305,9 @@ def fit_predict(cfg, Xtr, ytr, Xva, yva, Xte, feats_cat):
         return (m.predict_proba(B)[:, 1], m.predict_proba(C)[:, 1],
                 int(m.get_best_iteration() or p["n_estimators"]))
 
+    if name == "emb":
+        return _fit_emb(cfg, Xtr, ytr, Xva, yva, Xte, feats_cat)
+
     if name == "glm":
         from sklearn.linear_model import LogisticRegression
         from sklearn.preprocessing import StandardScaler
@@ -310,6 +324,123 @@ def fit_predict(cfg, Xtr, ytr, Xva, yva, Xte, feats_cat):
                 m.predict_proba(sc.transform(C))[:, 1], 0)
 
     raise ValueError(f"unknown learner {name!r}")
+
+
+
+def _fit_emb(cfg, Xtr, ytr, Xva, yva, Xte, feats_cat):
+    """Token-embedding MLP: each value of a high-cardinality column gets a LEARNED VECTOR.
+
+    This is the regularized form of the "tokens" idea. F1 tested the unregularized form --
+    LightGBM's native categorical split, which regroups 13,214 levels freely at every node
+    -- and it lost 0.000999 with best_iter collapsing from ~1000 to ~182, i.e. it memorized
+    instantly. An embedding differs in exactly the way that matters: the representation is
+    LOW-RANK (emb_dim=16 numbers per value, not an arbitrary partition), SHARED across the
+    whole model, and shrunk by weight decay and dropout. It can express more about a value
+    than target encoding's single scalar without being able to memorize a fold.
+
+    Leakage: the vocabulary is built over train union test, which is an unsupervised label
+    mapping and not a leak (README section 3). The COUNT threshold that decides which values
+    collapse to OOV is computed on the TRAINING FOLD ONLY, so which values are rare is never
+    learned from held-out rows. Embeddings themselves are fit inside the fold like any other
+    parameter.
+    """
+    import torch
+    import torch.nn as nn
+
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    tok_cols = [c for c in cfg["emb_cols"] if c in Xtr.columns]
+    # Dense side: everything that is not a token column, one-hot for the categoricals.
+    dense_src = [c for c in Xtr.columns if c not in tok_cols]
+    A = pd.get_dummies(Xtr[dense_src], columns=[c for c in feats_cat if c in dense_src],
+                       drop_first=True).astype(np.float32)
+    B = pd.get_dummies(Xva[dense_src], columns=[c for c in feats_cat if c in dense_src],
+                       drop_first=True).astype(np.float32).reindex(columns=A.columns, fill_value=0)
+    C = pd.get_dummies(Xte[dense_src], columns=[c for c in feats_cat if c in dense_src],
+                       drop_first=True).astype(np.float32).reindex(columns=A.columns, fill_value=0)
+    mu, sd = A.values.mean(0), A.values.std(0) + 1e-6      # fit on the training fold only
+    Ad, Bd, Cd = ((X.values - mu) / sd for X in (A, B, C))
+
+    # Token indices. 0 is reserved for OOV, which is where every value too rare in the
+    # TRAINING fold is sent -- so the OOV embedding is actually trained rather than being
+    # a random vector that only unseen rows ever hit.
+    vocabs, Ti = [], {}
+    for split, X in (("tr", Xtr), ("va", Xva), ("te", Xte)):
+        Ti[split] = []
+    for c in tok_cols:
+        vc = Xtr[c].value_counts()
+        keep = vc[vc >= cfg["emb_min_count"]].index
+        mapping = {v: i + 1 for i, v in enumerate(keep)}
+        vocabs.append(len(mapping) + 1)
+        for split, X in (("tr", Xtr), ("va", Xva), ("te", Xte)):
+            Ti[split].append(X[c].map(mapping).fillna(0).astype(np.int64).values)
+    Tt = {k: (np.stack(v, 1) if v else np.zeros((len(Ti[k][0]) if v else 0, 0), np.int64))
+          for k, v in Ti.items()}
+
+    class Net(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.embs = nn.ModuleList([nn.Embedding(n, cfg["emb_dim"]) for n in vocabs])
+            for e in self.embs:
+                nn.init.normal_(e.weight, 0, 0.01)
+            d = Ad.shape[1] + cfg["emb_dim"] * len(vocabs)
+            layers, prev = [], d
+            for h in cfg["emb_hidden"]:
+                layers += [nn.Linear(prev, h), nn.BatchNorm1d(h), nn.GELU(),
+                           nn.Dropout(cfg["emb_dropout"])]
+                prev = h
+            layers.append(nn.Linear(prev, 1))
+            self.mlp = nn.Sequential(*layers)
+
+        def forward(self, xd, xt):
+            parts = [xd] + [e(xt[:, k]) for k, e in enumerate(self.embs)]
+            return self.mlp(torch.cat(parts, 1)).squeeze(1)
+
+    torch.manual_seed(cfg["model_seed"])
+    net = Net().to(dev)
+    opt = torch.optim.AdamW(net.parameters(), lr=cfg["emb_lr"], weight_decay=1e-4)
+    lossf = nn.BCEWithLogitsLoss()
+
+    def tens(d, tk):
+        return (torch.tensor(d, dtype=torch.float32, device=dev),
+                torch.tensor(tk, dtype=torch.long, device=dev))
+    xdtr, xttr = tens(Ad, Tt["tr"])
+    xdva, xtva = tens(Bd, Tt["va"])
+    xdte, xtte = tens(Cd, Tt["te"])
+    ytr_t = torch.tensor(ytr, dtype=torch.float32, device=dev)
+
+    n, bs = len(ytr), cfg["emb_batch"]
+    sched = torch.optim.lr_scheduler.OneCycleLR(
+        opt, max_lr=cfg["emb_lr"], total_steps=cfg["emb_epochs"] * ((n + bs - 1) // bs))
+
+    @torch.no_grad()
+    def predict(xd, xt):
+        net.eval()
+        out = [torch.sigmoid(net(xd[i:i + 65536], xt[i:i + 65536])).cpu().numpy()
+               for i in range(0, len(xd), 65536)]
+        return np.concatenate(out)
+
+    best, best_va, best_te, bad, best_ep = -1.0, None, None, 0, 0
+    g = torch.Generator(device="cpu").manual_seed(cfg["model_seed"])
+    for ep in range(cfg["emb_epochs"]):
+        net.train()
+        perm = torch.randperm(n, generator=g).to(dev)
+        for i in range(0, n, bs):
+            idx = perm[i:i + bs]
+            opt.zero_grad()
+            loss = lossf(net(xdtr[idx], xttr[idx]), ytr_t[idx])
+            loss.backward()
+            opt.step()
+            sched.step()
+        pv = predict(xdva, xtva)
+        auc = roc_auc_score(yva, pv)          # AUC is the objective everywhere (README s3)
+        if auc > best + 1e-7:
+            best, best_va, best_te, bad, best_ep = auc, pv, predict(xdte, xtte), 0, ep
+        else:
+            bad += 1
+            if bad >= cfg["emb_patience"]:
+                break
+    print(f"    emb: best val auc {best:.6f} at epoch {best_ep}", flush=True)
+    return best_va, best_te, best_ep
 
 
 # --------------------------------------------------------------------------- main

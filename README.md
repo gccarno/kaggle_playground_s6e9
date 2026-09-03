@@ -323,6 +323,54 @@ form of it. A learned embedding is the opposite: a low-rank, shared, continuousl
 representation of value identity. **F1 is the wrong proxy, and testing the right one is the next
 move.**
 
+### Phase 2b — the token/embedding representation (2026-09-03)
+
+| probe | change | solo OOF | max corr vs pool | stack ADD |
+|---|---|---|---|---|
+| G1 | token-embedding MLP (emb_dim 16) | 0.943401 | **0.9508** | −0.000002 |
+| G2 | G1 retuned (lr 3e-4, emb_dim 8, min_count 20) | 0.943562 | — | not run |
+
+**The representation is genuinely different and still worthless.** G1's max correlation against the
+pool is **0.9508**, against a pack whose internal median is 0.9973 — this is by far the most
+decorrelated model in the repo, and its ADD contribution is **−0.000002**. That is playbook §7's
+rule firing verbatim: *high disagreement is usually weakness, not diversity; the test is whether
+disagreement comes WITH competitive solo strength.* It does not — G1/G2 sit ~0.0021 below the
+0.945402 pool floor, and playbook §6 says a leg below the floor contributes nothing however
+decorrelated. Measured, not assumed.
+
+G2 tested and rejected the obvious excuse for G1 (it peaked at epoch 3 of a 25-epoch OneCycle
+schedule, i.e. during LR warmup, which is a schedule bug rather than a capacity verdict). Fixing the
+schedule moved it +0.00016 — still 0.0021 short.
+
+### Reading the leaderboard's shape (playbook §8, 2026-09-03)
+
+533 teams. **We are rank 115 at 0.94588.**
+
+| | |
+|---|---|
+| top score | 0.94647 |
+| teams ≥ 0.9460 | **101** |
+| top 25 span | 0.94647 → 0.94624 = **0.00023** |
+| exact-score spikes | **13 teams at 0.94607**, 9 at 0.94621, 8 at 0.94624 |
+
+**The cluster above us is substantially a shared file.** Thirteen teams do not independently land on
+the same five-decimal score. This is the S6E8 pattern — "private ranks 50 through 200 span 0.00001
+AUC, which is one CSV, not 150 solutions" — arriving on day 3 rather than at the deadline.
+
+What that changes and what it does not:
+- It does **not** mean the score is fake. ~0.9460 is genuinely achievable, and the gap from our
+  0.94588 to it is ≈0.0002, which is real but small (1.7σ of the public paired SD).
+- It **does** mean rank is not measuring modelling in that band, so rank is not a target to steer by.
+- The artifact-sharing policy (§5) anticipated exactly this and **stands until 2026-09-21.** The
+  finding is logged now so the week-3 reassessment is made on evidence rather than at the deadline.
+
+The most-voted public notebooks were read for ideas (permitted; no artifact used). Their approach
+differs from ours in one testable way: target encoding over **quantile-binned and PAIRED keys with
+very heavy smoothing** (`TARGET_SMOOTHING=500`, `PAIR_TARGET_SMOOTHING=1500`) rather than our raw
+per-value keys at `te_smooth=5`. Our C3 probe found smoothing 100 *worse* than 5 — but that was on
+raw per-value keys, and heavy smoothing over coarse binned keys is a different regime, not a
+contradiction. It is the one concrete untested idea the frontier offers, and it is cheap.
+
 ### The OOF↔LB instrument, 5 paired points
 
 | run | OOF | public LB | offset |
