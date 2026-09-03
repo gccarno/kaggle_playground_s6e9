@@ -286,21 +286,42 @@ there was little variance there to cancel. One prediction of the reframe has now
 remaining variance levers (in-fold seed bagging, multi-learner ensembling) are untested, so the
 reframe is **weakened but not refuted**, and the next probes are the ones that settle it.
 
-### What this reframes the competition into
+### Phase 2 — the variance reframe is REFUTED (2026-09-03)
 
-Signal discovery looks finished. The lookup is extracted, cross-feature structure is absent,
-interactions are worth +0.000033, and the rare tail is negligible. Every capacity result points
-downward (255 leaves −0.000894; 15, 7 and 3 leaves all exactly +0.000212). The reading is that what
-separates 0.945642 from the public top is **estimation variance, not missing signal**.
+After Phase 1c I concluded that signal discovery was finished and the remaining gap to the frontier
+was estimation variance. That was **wrong**, and all three of its levers have now been tested:
 
-**Status of that reading: one prediction tested, one prediction failed (E3).** Treat it as a
-hypothesis under test, not a conclusion. It is settled by:
-- in-fold seed bagging (`seed_bag`) — averaging several models per fold,
-- a multi-learner stack (XGBoost, CatBoost) — whether a fitted combiner can subtract correlated
-  error here the way it did in S6E8.
+| lever | probe | result |
+|---|---|---|
+| encoding variance | E3 — TE averaged over 4 inner splits | −0.000019 **null** |
+| model-fitting variance | F2 — 3-seed bagging inside each fold | +0.000034 **null** |
+| combiner / correlated error | 6-leg fitted logit stack | +0.000030 over the best single **null** |
 
-If both also come back null, the reading is wrong and the remaining gap is signal we have not
-found — in which case the honest move is to say so rather than keep tuning.
+All three sit at or below the 0.000038 seed-noise floor. **The reframe is refuted.**
+
+**Why the stack bought nothing, measured rather than assumed.** Pairwise correlation of the six
+legs' OOF logits runs **0.9922 to 0.9995**, median 0.9973 — including across the LightGBM/XGBoost
+boundary, which is only 0.9980. The fitted combiner put **0 of 6 weights negative**, against 10 of 23
+in S6E8. This is playbook §6's discriminator firing exactly as written: *a fitted stack earns its
+keep when it can subtract correlated error; if your pool is a set of near-twins, average them.* Six
+models on one representation are one model.
+
+**What that leaves.** The remaining ≈0.0006 to the public top is **signal we have not found**, not
+noise we have failed to average away. And the failed token probe says something about where it is
+*not*:
+
+| probe | change | Δ vs E1 |
+|---|---|---|
+| F1 | income also as a native LightGBM categorical (13,214 levels) | **−0.000999** |
+
+F1 was the cheap test of the "tokens" idea visible in the public frontier's most-voted notebooks
+("EV Adoption Tokens: XGBoost + TinyTokenTransformer", "94.6+ Transformer and GBDT Ensemble"). It
+failed hard, and `best_iter` collapsing to ~182 from E1's ~1000 says why: LightGBM's categorical
+split is a **free-form, unregularized regrouping** of 13,214 levels at every node, so it memorizes
+immediately. That is not evidence against the token idea — it is evidence against the *unregularized*
+form of it. A learned embedding is the opposite: a low-rank, shared, continuously-regularized
+representation of value identity. **F1 is the wrong proxy, and testing the right one is the next
+move.**
 
 ### The OOF↔LB instrument, 5 paired points
 

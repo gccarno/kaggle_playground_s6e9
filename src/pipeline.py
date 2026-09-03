@@ -76,6 +76,8 @@ DEFAULTS = {
     "te_backoff_smooth": 50.0,       # smoothing of the neighborhood level toward the prior
     "te_count_feature": False,       # also emit log1p(train-fold count) per encoded column
     "monotone_income": False,        # monotone increasing constraint on income
+    "cat_cols": [],                  # columns ALSO handed to the learner as native
+                                     # high-cardinality categoricals (see base_features)
 
     "params": {
         "n_estimators": 3000, "learning_rate": 0.05, "num_leaves": 63,
@@ -116,6 +118,24 @@ def base_features(train, test, cfg):
         for df in (tr, te):
             df["log_income"] = np.log(df["Annual_Income_USD"])
         feats_num += ["log_income"]
+
+    if cfg["cat_cols"]:
+        # The cheap version of the "tokens" idea the public frontier is using: instead of
+        # compressing a value to one number (its target rate, as TE does), hand the value
+        # IDENTITY to the learner and let it group levels itself. LightGBM's categorical
+        # split sorts levels by accumulated gradient/hessian and cuts the sorted order,
+        # which is a lookup mechanism the numeric path does not have at all.
+        #
+        # NOT a leak: the sort is computed by LightGBM from the training rows it is given,
+        # inside the fold, exactly like any other split statistic. The vocabulary below is
+        # an unsupervised label mapping over train union test, which is also not a leak
+        # (README section 3) and is what keeps an unseen test level from raising.
+        for c in cfg["cat_cols"]:
+            name = f"cat_{c}"
+            vocab = pd.api.types.CategoricalDtype(sorted(set(tr[c]) | set(te[c])))
+            tr[name] = tr[c].astype(vocab)
+            te[name] = te[c].astype(vocab)
+            feats_cat.append(name)
 
     if cfg["drop_noise"]:
         feats_num = [c for c in feats_num if c not in NOISE_CANDIDATES]
