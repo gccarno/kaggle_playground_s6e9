@@ -75,6 +75,15 @@ DEFAULTS = {
     "te_backoff_bins": 200,          # quantile bins defining a neighborhood (fold-fit)
     "te_backoff_smooth": 50.0,       # smoothing of the neighborhood level toward the prior
     "te_count_feature": False,       # also emit log1p(train-fold count) per encoded column
+    # -- the public frontier's encoder recipe: TE over QUANTILE-BINNED and PAIRED keys
+    #    with very heavy smoothing, rather than our raw per-value keys at te_smooth=5.
+    #    Default-off, so every archived run is bit-identical to what it was.
+    "te_bin_cols": [],               # SUPERVISED TE keyed on the quantile-BIN index
+    "te_bins": 100,                  # quantile bins for te_bin_cols (fold-fit edges)
+    "te_bin_smooth": 500.0,          # frontier's TARGET_SMOOTHING
+    "te_pair_cols": [],              # SUPERVISED TE keyed on a PAIR, e.g. [["A","B"], ...]
+    "te_pair_bins": 20,              # bins applied to a high-cardinality pair component
+    "te_pair_smooth": 1500.0,        # frontier's PAIR_TARGET_SMOOTHING
     "monotone_income": False,        # monotone increasing constraint on income
     # -- "emb" learner only: value identity as a LEARNED EMBEDDING.
     "emb_cols": ["Annual_Income_USD", "Daily_Commute_km", "Age"],
@@ -167,7 +176,7 @@ def _te_stats(values, y):
     return pd.DataFrame({"v": values, "y": y}).groupby("v")["y"].agg(["sum", "count"])
 
 
-def _fit_encoder(values, y, bins, cfg, prior):
+def _fit_encoder(values, y, bins, cfg, prior, smooth=None):
     """Build a value -> encoded-rate mapping, plus the backoff needed for unseen values.
 
     Two backoff modes, and the difference is the whole point of the `te_backoff` knob:
@@ -190,7 +199,8 @@ def _fit_encoder(values, y, bins, cfg, prior):
         target = vbin.reindex(st.index).map(bin_rate).fillna(prior)
     else:
         bin_rate, target = None, pd.Series(prior, index=st.index)
-    enc = (st["sum"] + target * cfg["te_smooth"]) / (st["count"] + cfg["te_smooth"])
+    sm = cfg["te_smooth"] if smooth is None else float(smooth)
+    enc = (st["sum"] + target * sm) / (st["count"] + sm)
     return enc, st["count"], bin_rate
 
 
@@ -254,6 +264,72 @@ def apply_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
             Xtr[cname] = np.log1p(cnt_tr)
             Xva[cname] = np.log1p(Xva[c].map(n).fillna(0.0).values)
             Xte[cname] = np.log1p(Xte[c].map(n).fillna(0.0).values)
+    return new_cols
+
+
+def _key_codes(Xtr, Xva, Xte, cols, nbins):
+    """Integer key codes for one or more columns, aligned across the three splits.
+
+    A high-cardinality NUMERIC component is replaced by its quantile-BIN index, with the
+    edges fit on the TRAINING FOLD ONLY per the leakage rule. A low-cardinality or
+    categorical component is label-encoded over train union test, which is an UNSUPERVISED
+    mapping and therefore not a leak (README section 3) -- it exists only so that a level
+    absent from one split cannot shift another split's codes.
+
+    Multiple components are combined into one composite code by mixed-radix packing, which
+    is what makes a PAIR a single lookup key rather than two independent columns.
+    """
+    codes = {"tr": None, "va": None, "te": None}
+    src = {"tr": Xtr, "va": Xva, "te": Xte}
+    for c in cols:
+        col = {k: X[c] for k, X in src.items()}
+        if pd.api.types.is_numeric_dtype(col["tr"]) and col["tr"].nunique() > nbins:
+            edges = np.unique(np.quantile(col["tr"].values, np.linspace(0, 1, nbins + 1)))
+            part = {k: np.searchsorted(edges, v.values) for k, v in col.items()}
+            n_levels = len(edges) + 1
+        else:
+            cats = pd.Index(sorted(set().union(*(set(v.astype(str)) for v in col.values()))))
+            part = {k: cats.get_indexer(v.astype(str)) + 1 for k, v in col.items()}
+            n_levels = len(cats) + 1
+        for k in codes:
+            codes[k] = part[k] if codes[k] is None else codes[k] * n_levels + part[k]
+    return codes
+
+
+def apply_key_target_encoding(Xtr, ytr, Xva, Xte, keys, smooth, nbins, cfg, rng_seed,
+                              prefix):
+    """SUPERVISED TE keyed on a quantile BIN or on a PAIR of columns, fit on the fold only.
+
+    Why this is a different regime from `apply_target_encoding` rather than a contradiction
+    of C3 (raw-value keys at smoothing 100 lost 0.000667): the key here is COARSE. A bin
+    holds thousands of rows instead of ~50, so heavy smoothing shrinks a well-estimated
+    rate only slightly, and what the feature carries is the denoised local trend rather
+    than the per-value lookup. Training rows get their encoding from an inner K-fold, as
+    everywhere else, so no row contributes to its own key's rate.
+
+    Backoff is the global prior, not a neighborhood: a bin key HAS no neighborhood beyond
+    itself, and a pair key's neighborhood is the very interaction the feature is testing.
+    """
+    prior = float(ytr.mean())
+    kcfg = {**cfg, "te_backoff": "prior"}
+    new_cols = []
+    for key in keys:
+        cols = [key] if isinstance(key, str) else list(key)
+        name = prefix + "__".join(cols)
+        new_cols.append(name)
+        codes = _key_codes(Xtr, Xva, Xte, cols, nbins)
+        ktr = pd.Series(codes["tr"], index=Xtr.index)
+
+        enc_tr = np.zeros(len(Xtr), dtype=np.float64)
+        inner = StratifiedKFold(cfg["te_inner_folds"], shuffle=True, random_state=rng_seed)
+        for i, j in inner.split(Xtr, ytr):
+            e, _, _ = _fit_encoder(ktr.iloc[i].values, ytr[i], None, kcfg, prior, smooth)
+            enc_tr[j] = ktr.iloc[j].map(e).fillna(prior).values
+        Xtr[name] = enc_tr
+
+        e, _, _ = _fit_encoder(ktr.values, ytr, None, kcfg, prior, smooth)
+        Xva[name] = pd.Series(codes["va"], index=Xva.index).map(e).fillna(prior).values
+        Xte[name] = pd.Series(codes["te"], index=Xte.index).map(e).fillna(prior).values
     return new_cols
 
 
@@ -473,6 +549,14 @@ def main():
         if cfg["te_cols"]:
             apply_target_encoding(Xtr, ytr, Xva, Xte, cfg["te_cols"], cfg,
                                   cfg["cv_seed"] + f)
+        if cfg["te_bin_cols"]:
+            apply_key_target_encoding(Xtr, ytr, Xva, Xte, cfg["te_bin_cols"],
+                                      cfg["te_bin_smooth"], cfg["te_bins"], cfg,
+                                      cfg["cv_seed"] + f, "teb_")
+        if cfg["te_pair_cols"]:
+            apply_key_target_encoding(Xtr, ytr, Xva, Xte, cfg["te_pair_cols"],
+                                      cfg["te_pair_smooth"], cfg["te_pair_bins"], cfg,
+                                      cfg["cv_seed"] + f, "tep_")
 
         n_model_features = Xtr.shape[1]
         # Seed-bagging INSIDE a fold averages several models trained on the same rows,

@@ -342,6 +342,54 @@ G2 tested and rejected the obvious excuse for G1 (it peaked at epoch 3 of a 25-e
 schedule, i.e. during LR warmup, which is a schedule bug rather than a capacity verdict). Fixing the
 schedule moved it +0.00016 — still 0.0021 short.
 
+### Phase 2c — the frontier's encoder recipe, tested and rejected (2026-09-03)
+
+The one concrete untested idea the public frontier offered (logged in "Reading the leaderboard's
+shape" below): target encoding over **quantile-binned** and **paired** keys with very heavy
+smoothing (`TARGET_SMOOTHING=500`, `PAIR_TARGET_SMOOTHING=1500`), rather than our raw per-value keys
+at `te_smooth=5`. Three strict twins of E1 (0.945642). **None ships.**
+
+| probe | change | OOF | Δ vs E1 | mean `best_iter` |
+|---|---|---|---|---|
+| **H1** | + TE on quantile-**bin** keys of the 3 numerics (100 bins, smooth 500) | 0.945617 | **−0.000025** | 1041 |
+| **H2** | + TE on **5 paired** keys (20 bins/component, smooth 1500) | 0.945121 | **−0.000521** | 333 |
+| **H3** | + TE on **1 paired** key (income × concern) | 0.945237 | −0.000405 | 637 |
+| *(E1)* | *baseline* | *0.945642* | — | *998* |
+
+Encoder verified leak-free before the probes ran: a random 13,214-level key encoded through the same
+inner-fold protocol scores **0.4982** on held-out rows, and train-row and val-row AUCs of the real
+keys agree to 0.001 (0.68204 / 0.68102).
+
+**H1 — binned keys are null, and the reason is that we already compute them.** E1's neighborhood
+backoff *already* estimates the smoothed local bin rate; it just uses it as a shrinkage target for
+rare values instead of exposing it as a column. Handing the same quantity to the learner a second
+time adds nothing. C3 (raw-value keys at smoothing 100, −0.000667) and H1 are therefore not in
+tension: heavy smoothing over coarse keys is harmless-and-redundant, heavy smoothing over fine keys
+destroys the lookup. **Neither is a lever.**
+
+**H2/H3 — paired keys actively cost, by DISPLACEMENT, and the two probes separate the mechanism.**
+`income × concern` alone reaches solo AUC **0.877** — one column that is nearly a complete model. The
+tree eats it greedily and early-stops long before it has refined the additive per-feature shapes E1
+spends ~1000 rounds building: `best_iter` falls **998 → 637 → 333** as more lookup is handed over, and
+the loss grows with it. One pair costs **78%** of what five cost, so this is displacement by the
+dominant key, not noise accumulating across five correlated columns. It is F1's signature again
+(best_iter 1000 → 182, −0.000999) with a different, *regularized* feature — which makes the point
+sharper: a coarse joint lookup is not too noisy, it is too **coarse**, and it crowds out finer
+additive structure that is worth more.
+
+**This closes the encoder axis, and it is the third independent confirmation that the generator is
+additive.** The first was the GLM (all 28 pairwise interactions worth +0.000033); the second the
+joint-key residual test (8 of 9 keys at 0.85–0.95). H2/H3 are the strongest of the three, because
+they answer the objection the other two could not: E1 runs at `num_leaves=7` *precisely because* the
+generator is additive, so it can barely represent a 2-way interaction — the worry was that the
+capacity cut had thrown real interactions away. Handing five of them over as pre-computed columns,
+which is the cheapest possible way to buy an interaction, makes things **worse**. The capacity cut
+threw nothing away.
+
+**What it means for the leaderboard reading.** The frontier's encoder recipe is not where the ≈0.0002
+above us comes from — we tested it and it is behind ours. That is consistent with, not evidence
+against, the shared-file finding below.
+
 ### Reading the leaderboard's shape (playbook §8, 2026-09-03)
 
 533 teams. **We are rank 115 at 0.94588.**
