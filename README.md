@@ -419,18 +419,29 @@ per-value keys at `te_smooth=5`. Our C3 probe found smoothing 100 *worse* than 5
 raw per-value keys, and heavy smoothing over coarse binned keys is a different regime, not a
 contradiction. It is the one concrete untested idea the frontier offers, and it is cheap.
 
-### The OOF↔LB instrument, 5 paired points
+### The OOF↔LB instrument, 7 paired points
 
 | run | OOF | public LB | offset |
 |---|---|---|---|
 | A0 | 0.941660 | 0.94149 | −0.000170 |
 | B5 | 0.944738 | 0.94511 | +0.000372 |
+| **H2** | **0.945121** | **0.94536** | **+0.000239** |
 | C2 | 0.945225 | 0.94549 | +0.000265 |
 | D4 | 0.945437 | 0.94566 | +0.000223 |
 | E1 | 0.945642 | 0.94586 | +0.000218 |
+| E4 | 0.945689 | 0.94588 | +0.000191 |
 
-**Spearman = 1.0000, slope 1.12, residual σ 0.000122** — and that σ is essentially the public
-split's own paired bootstrap SD (0.000116), which is the ideal result: the residual is split noise,
-so the OOF is an unbiased ranker. Still provisional at 5 points; the gate stays at the interim
-+0.0001 until ~10. **The offset is not a trend** — its range across these five is 0.000542 against a
-0.000116 paired SD, and playbook §5 is the post-mortem of reading exactly this kind of series.
+**Spearman = 1.0000, slope 1.10, residual σ 0.000101** — and that σ is at the public split's own
+paired bootstrap SD (0.000116), which is the ideal result: the residual is split noise, so the OOF is
+an unbiased ranker. Still provisional at 7 points; the gate stays at the interim +0.0001 until ~10.
+**The offset is not a trend** — its range is 0.000542 against a 0.000116 paired SD, and playbook §5
+is the post-mortem of reading exactly this kind of series.
+
+**H2 is the most informative point in the series so far, and it is a rejected probe.** The other six
+are champions, so the whole instrument was previously fitted on "we improved and the LB agreed" —
+a series that is monotone by construction and cannot catch a ranker that is merely optimistic.
+H2 is the first point submitted *because it lost*: it lands **between B5 and C2** on OOF, and the
+LB placed it between B5 and C2, to within 0.00002 of the fit. A deliberately worse model being
+ranked correctly-worse is evidence a monotone run of improvements cannot supply. This is what
+playbook §1's "burn the slots" rule is actually for — the cheapest paired points are the ones
+you were not going to ship anyway.
