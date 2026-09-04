@@ -85,6 +85,13 @@ DEFAULTS = {
     "te_pair_bins": 20,              # bins applied to a high-cardinality pair component
     "te_pair_smooth": 1500.0,        # frontier's PAIR_TARGET_SMOOTHING
     "monotone_income": False,        # monotone increasing constraint on income
+    # Forbid ALL feature interactions -> the tree ensemble becomes a boosted GAM.
+    # The generator is measured additive in log-odds three independent ways (README
+    # section 6 and the Phase 2c log): the GLM's 28 pairwise interactions were worth
+    # +0.000033, 8 of 9 joint-key residual ratios sat at 0.85-0.95, and H2/H3 made things
+    # WORSE by handing the tree five pre-computed interactions. So a tree that can still
+    # interact is spending capacity on structure that is not there. lgb learner only.
+    "additive_only": False,
     # -- "emb" learner only: value identity as a LEARNED EMBEDDING.
     "emb_cols": ["Annual_Income_USD", "Daily_Commute_km", "Age"],
     "emb_dim": 16,                   # embedding width per token column
@@ -343,8 +350,14 @@ def fit_predict(cfg, Xtr, ytr, Xva, yva, Xte, feats_cat):
         mono = None
         if cfg["monotone_income"]:
             mono = [1 if c == "Annual_Income_USD" else 0 for c in Xtr.columns]
+        # One group per column = every tree may split on exactly one feature, so the
+        # ensemble is a sum of univariate functions. Note this DECOUPLES capacity from
+        # interaction order: num_leaves now buys per-feature shape resolution only, which
+        # is why the capacity bracket has to be re-run once this is on (B7 cut capacity
+        # 63 -> 7 precisely BECAUSE interactions were harmful).
+        inter = [[i] for i in range(Xtr.shape[1])] if cfg["additive_only"] else None
         m = lgb.LGBMClassifier(random_state=cfg["model_seed"], n_jobs=-1, verbose=-1,
-                               monotone_constraints=mono, **p)
+                               monotone_constraints=mono, interaction_constraints=inter, **p)
         m.fit(Xtr, ytr, eval_X=Xva, eval_y=yva, eval_metric="auc",
               callbacks=[lgb.early_stopping(cfg["early_stopping_rounds"], verbose=False)])
         return (m.predict_proba(Xva)[:, 1], m.predict_proba(Xte)[:, 1],

@@ -45,7 +45,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.special import logit
+from scipy.special import expit, logit
+from scipy.stats import rankdata
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 from sklearn.preprocessing import StandardScaler
@@ -160,6 +161,15 @@ def main():
                          "fixed-rule = every leg with solo OOF >= FIXED_RULE_MIN_SOLO, C pinned (Final B)")
     ap.add_argument("--C", type=float, default=None,
                     help="pin the regularisation instead of searching C_GRID")
+    ap.add_argument("--mode", choices=("logit", "rank_mean", "logit_mean"), default="logit",
+                    help="logit = FITTED logistic combiner (default); rank_mean / logit_mean "
+                         "= FIXED equal-weight blend, no meta-fit at all. Playbook section 6: "
+                         "'fitted stack or fixed blend -- test both, assume neither'. A fitted "
+                         "combiner earns its keep by SUBTRACTING correlated error; on a pool of "
+                         "near-twins (S6E9's six legs correlate 0.9922-0.9995, 0 of 6 weights "
+                         "negative) there is nothing to subtract, and section 6 says average "
+                         "instead. The fixed modes also carry NO meta-fit optimism, which is "
+                         "the asymmetry the honest_oof docstring above is about.")
     ap.add_argument("--submit", action="store_true")
     ap.add_argument("--notes", default="")
     args = ap.parse_args()
@@ -187,33 +197,58 @@ def main():
     a_champ = (roc_auc_score(y, P[:, [idx[r] for r in champ_ids]].mean(1))
                if all(r in idx for r in champ_ids) else float("nan"))
 
-    best = (-1.0, None, None)
-    for C in (C_GRID if args.C is None else [args.C]):
-        p = honest_oof(L, y, folds, C)
-        a = roc_auc_score(y, p)
-        print(f"  stack C={C:<5g} honest OOF {a:.6f}   vs equal-weight champion {a - a_champ:+.6f}")
-        if a > best[0]:
-            best = (a, C, p)
-    auc, C, stack_oof = best
-    print(f"\n{'pinned' if args.C is not None else 'selected'} C={C}, OOF {auc:.6f}")
+    if args.mode == "logit":
+        best = (-1.0, None, None)
+        for C in (C_GRID if args.C is None else [args.C]):
+            p = honest_oof(L, y, folds, C)
+            a = roc_auc_score(y, p)
+            print(f"  stack C={C:<5g} honest OOF {a:.6f}   vs equal-weight champion {a - a_champ:+.6f}")
+            if a > best[0]:
+                best = (a, C, p)
+        auc, C, stack_oof = best
+        print(f"\n{'pinned' if args.C is not None else 'selected'} C={C}, OOF {auc:.6f}")
 
-    label = (f"Final B fixed-rule stack, {len(names)} legs, C={C}" if args.pool == "fixed-rule"
-             else f"logit stack, {len(names)} legs, C={C}")
+        label = (f"Final B fixed-rule stack, {len(names)} legs, C={C}" if args.pool == "fixed-rule"
+                 else f"logit stack, {len(names)} legs, C={C}")
 
-    # Test predictions come from a meta-model fit on ALL OOF rows. Known and accepted
-    # asymmetry: test predictions are averages over 5 fold-models while OOF predictions
-    # come from one model each, so the member spread is slightly smaller on test. It shifts
-    # the scale, not the ranking, and AUC only reads the ranking.
-    sc = StandardScaler().fit(L)
-    final = LogisticRegression(C=C, max_iter=5000, tol=1e-5).fit(sc.transform(L), y)
-    test_pred = final.predict_proba(sc.transform(LT))[:, 1]
+        # Test predictions come from a meta-model fit on ALL OOF rows. Known and accepted
+        # asymmetry: test predictions are averages over 5 fold-models while OOF predictions
+        # come from one model each, so the member spread is slightly smaller on test. It shifts
+        # the scale, not the ranking, and AUC only reads the ranking.
+        sc = StandardScaler().fit(L)
+        final = LogisticRegression(C=C, max_iter=5000, tol=1e-5).fit(sc.transform(L), y)
+        test_pred = final.predict_proba(sc.transform(LT))[:, 1]
+        coef = final.coef_[0]
+    else:
+        # FIXED equal-weight blend. Nothing is fitted, so there is no C, no honest_oof and
+        # -- the point of the exercise -- no meta-fit optimism to price in: this OOF is
+        # directly comparable to a single leg's, which the fitted stack's is not.
+        #
+        # rank_mean averages each leg's rank, logit_mean averages each leg's logit. They
+        # differ only in how a leg's confidence is scaled before averaging: ranks discard
+        # it entirely (leg-scale invariant), logits keep it (and, per the docstring above,
+        # keep resolution where the probability scale has none). Both are monotone
+        # per-leg transforms, so neither changes any single leg's own AUC.
+        C = None
+        if args.mode == "rank_mean":
+            stack_oof = np.column_stack([rankdata(P[:, i]) for i in range(P.shape[1])]).mean(1) / len(y)
+            test_pred = np.column_stack([rankdata(PT[:, i]) for i in range(PT.shape[1])]).mean(1) / len(ids)
+        else:
+            # expit is monotone, so it cannot change AUC; it exists only to land the
+            # submission back in [0, 1] for the validation asserts below.
+            stack_oof, test_pred = expit(L.mean(1)), expit(LT.mean(1))
+        auc = roc_auc_score(y, stack_oof)
+        print(f"  {args.mode} blend, equal weights, honest OOF {auc:.6f}"
+              f"   vs equal-weight-probability champion {auc - a_champ:+.6f}")
+        label = f"{args.mode} blend, {len(names)} legs, equal weights"
+        coef = np.full(len(names), 1.0 / len(names))
 
     w = pd.DataFrame({"leg": [n.split(":")[0] for n in names], "learner": [n.split(":")[1] for n in names],
                       "solo": [roc_auc_score(y, P[:, i]) for i in range(len(names))],
-                      "weight": final.coef_[0]})
+                      "weight": coef})
     print("\n" + w.reindex(w.weight.abs().sort_values(ascending=False).index)
           .to_string(index=False, float_format="%.4f"))
-    print(f"\nnegative weights: {(final.coef_[0] < 0).sum()} of {len(names)}")
+    print(f"\nnegative weights: {(coef < 0).sum()} of {len(names)}")
 
     run_id = uuid.uuid4().hex[:8]
     dest = PREDS / run_id
@@ -225,8 +260,8 @@ def main():
     sub.to_csv(dest / "submission.csv", index=False)
     (dest / "manifest.json").write_text(json.dumps(
         {"sources": [n.split(":")[0] for n in names], "learners": names, "C": C,
-         "pool": args.pool, "C_pinned": args.C is not None,
-         "coef": final.coef_[0].tolist(), "oof_auc": auc,
+         "pool": args.pool, "mode": args.mode, "C_pinned": args.C is not None,
+         "coef": np.asarray(coef).tolist(), "oof_auc": auc,
          "equal_weight_champion_oof": a_champ}, indent=1), encoding="utf-8")
 
     ss = pd.read_csv(REPO_ROOT / "data" / "sample_submission.csv")
@@ -264,7 +299,10 @@ def main():
         "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "git_commit": subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
                                      text=True, cwd=REPO_ROOT).stdout.strip(),
-        "kernel_ref": "stack", "run_tag": "logit_stack",
+        # "blend" is in COMBINATION_TAGS above, so a fixed blend can never be readmitted
+        # as a leg of a later stack -- that would count its members twice.
+        "kernel_ref": "stack",
+        "run_tag": "logit_stack" if args.mode == "logit" else "blend",
         "description": label,
         "final_oof_auc": round(float(auc), 6), "public_lb_score": score,
         "n_folds": 5, "cv_seed": 42,

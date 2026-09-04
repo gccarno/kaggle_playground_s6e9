@@ -78,8 +78,25 @@ post-mortem of exactly that mistake.
 | **Paired ΔAUC SD, full OOF** | **0.000034** | same, at 668,665 rows; agrees with the seed floor, as it should |
 | Single-score SD, public split | 0.001078 | bootstrap of one model's absolute AUC at 57,314 rows |
 | Single-score SD, private split | 0.000548 | same, at 229,257 rows |
-| OOF→LB slope | *unset* | needs ≥10 paired runs |
-| OOF→LB residual σ | *unset* | same fit; **the shipping gate is ~1σ converted to OOF units** |
+| **OOF→LB slope** | **1.0832** | least squares over **10 GBDT-family** paired runs (2026-09-04) |
+| **OOF→LB residual σ** | **0.000103** | same fit; at the public split's own paired resolution, as it should be |
+| **SHIPPING GATE** | **+0.0000949 OOF** | = residual σ ÷ slope. **Replaces the interim +0.0001 placeholder**, which it confirms. |
+
+**The paired ΔAUC SD is a property of the PAIR, not of the split.** Measured 2026-09-04 and it
+changes how every LB comparison is read:
+
+| pair | OOF logit corr | paired SD, public split |
+|---|---|---|
+| F2 vs E1 (strict twins) | ~0.9999 | **0.000027** |
+| the 0.000116 row above | — | 0.000116 |
+| G1 vs E1 (embedding MLP) | 0.9508 | **0.000237** |
+
+An order of magnitude of range. So a strict-twin LB comparison resolves ~4× *finer* than the wall
+number implies, and a comparison against a decorrelated model ~2× coarser. Quote the SD for the
+actual pair — `scripts/split_resolution.py <runA> <runB>` — never the single number.
+
+**The OOF→LB fit is valid within the GBDT family ONLY.** Adding one non-GBDT point (G1) to the
+regression blows the residual σ from 0.000103 to **0.000340**, a 3.3× degradation. See Phase 3.
 
 Reproduce with `python scripts/split_resolution.py <runA> <runB>`. The public split is
 **20%** of the 286,571 test rows — 57,314 public / 229,257 private. Confirmed 2026-09-02.
@@ -90,10 +107,11 @@ statement and simultaneously a **4σ paired difference** against that specific o
 predictions. Both are true. Always compare against a named opponent's predictions, never against a
 rank (playbook §8).
 
-**Interim shipping gate: +0.0001 OOF** — about 2.6× the seed-noise floor, and comfortably below the
-public split's paired resolution so that a passing probe is at least *potentially* visible. This is a
-placeholder derived from the noise floor alone; it is replaced by ~1σ of the OOF→LB residual as soon
-as ~10 paired runs exist.
+~~**Interim shipping gate: +0.0001 OOF**~~ — **superseded 2026-09-04.** The gate is now
+**+0.0000949 OOF**, derived as residual σ ÷ slope over 10 paired runs exactly as planned. The
+placeholder was right to within 5%, so nothing about past decisions changes; what changes is that
+the number is now measured rather than guessed, and per playbook §3 it stays fixed for the rest of
+the competition. **Do not re-derive it later from marginal LB deltas.**
 
 ## 5. The strategic decisions, made on day one
 
@@ -419,21 +437,101 @@ per-value keys at `te_smooth=5`. Our C3 probe found smoothing 100 *worse* than 5
 raw per-value keys, and heavy smoothing over coarse binned keys is a different regime, not a
 contradiction. It is the one concrete untested idea the frontier offers, and it is cheap.
 
-### The OOF↔LB instrument, 7 paired points
+### Phase 3 — the instrument is finished, and it turns out to be family-specific (2026-09-04)
 
-| run | OOF | public LB | offset |
+Five slots spent in one day (playbook §1's "burn the slots" rule, applied deliberately for the first
+time): two on champion candidates, **two chosen purely to stress the instrument**. The two stress
+points are where the value was.
+
+| slot | submission | OOF | predicted LB | actual LB | |
+|---|---|---|---|---|---|
+| 1 | F2 (3-seed bagged E1) | 0.945676 | 0.94590 | **0.94587** | ✅ 1σ |
+| 2 | **G1** (embedding MLP) | 0.943401 | 0.94345 | **0.94450** | ❌ **+0.00105 = 4.4σ** |
+| 3 | 3-leg fixed rank-mean blend | 0.945743 | 0.94603 | **0.94588** | −1.5σ |
+| 4 | I1 (boosted GAM) | 0.945581 | 0.94582 | **0.94570** | −1.2σ |
+
+**1. The OOF→LB ranker is valid for GBDTs and NOT across model families.** G1 scores 0.00105 higher
+than its OOF predicts. This is not split luck: the G1↔E1 paired SD was measured at **0.000237**
+(2× a near-twin pair's, because decorrelated models do not share split luck) and the miss is still
+4.4σ. Include G1 in the regression and the residual σ goes 0.000103 → **0.000340**.
+
+*Mechanism, hypothesised and not yet measured:* **an OOF row is predicted by ONE fold-model; a test
+row is the average of FIVE.** For G1 — a net that early-stopped at epoch 3–6 — that averaging is a
+large variance cut. For a 1000-round GBDT it is nearly nothing. So OOF systematically *understates*
+high-variance learners, and our instrument was calibrated entirely on low-variance ones.
+**Consequence if true: Phase 2b rejected G1 with a biased ruler**, and every future neural leg must
+be seed-bagged in-fold before its OOF is compared to a GBDT's. The offline test needs no slot —
+bag G1 in-fold and see whether its OOF jumps ~0.001; F2 is the control, where the same treatment on
+E1 bought +0.000034.
+
+**2. The paired SD is a property of the pair, not the split** (§4). Range measured: 0.000027 for
+strict twins, 0.000237 at corr 0.95.
+
+**3. Playbook §6's open question, answered: fixed beats fitted here, and the elbow is at 3.**
+
+| combiner | OOF |
+|---|---|
+| **fixed rank-mean, 3 legs (E1 lgb + E4 xgb + E5 cat)** | **0.945743** |
+| fitted logit stack, 6 legs | 0.945719 |
+| fixed rank-mean / logit-mean, 6 legs | 0.945712 |
+
+Exactly §6's prediction for a pool of near-twins. `rank_mean` and `logit_mean` agree to 6 dp — at
+corr 0.998 the scale choice is irrelevant, and unlike S6E8 this target does not saturate. **But the
++0.000054 OOF edge over E4 produced 0.00000 on the LB**, which is below that pair's resolution, so
+§5 forbids reading it either way. The 3-leg fixed blend is the §9 **Final B** candidate: no fitted
+machinery at all.
+
+**4. `id` carries nothing.** AUC 0.49999, flat across deciles, zero train/test id overlap.
+
+### Phase 3b — the additivity constraint, and a mechanism in README that was wrong
+
+`additive_only` (LightGBM `interaction_constraints`, one group per column) makes the ensemble an
+exact boosted GAM. Two strict twins, chained one field at a time, plus D2 which *is* E1's recipe at
+63 leaves — giving a complete 2×2:
+
+| | 63 leaves | 7 leaves | **Δ (7−63)** |
 |---|---|---|---|
-| A0 | 0.941660 | 0.94149 | −0.000170 |
-| B5 | 0.944738 | 0.94511 | +0.000372 |
-| **H2** | **0.945121** | **0.94536** | **+0.000239** |
-| C2 | 0.945225 | 0.94549 | +0.000265 |
-| D4 | 0.945437 | 0.94566 | +0.000223 |
-| E1 | 0.945642 | 0.94586 | +0.000218 |
-| E4 | 0.945689 | 0.94588 | +0.000191 |
+| interactions allowed | D2 0.945402 | E1 0.945642 | **+0.000240** |
+| interactions forbidden | I2 0.945380 | I1 0.945581 | **+0.000201** |
+| **Δ (forbid−allow)** | **−0.000022** | **−0.000061** | |
 
-**Spearman = 1.0000, slope 1.10, residual σ 0.000101** — and that σ is at the public split's own
-paired bootstrap SD (0.000116), which is the ideal result: the residual is split noise, so the OOF is
-an unbiased ranker. Still provisional at 7 points; the gate stays at the interim +0.0001 until ~10.
+**Forbidding interactions costs ~nothing at either capacity** — the fourth independent confirmation
+that the generator is additive, and the most direct, since it is a constraint rather than an
+inference. Both deltas sit at or near the 0.000038 seed floor.
+
+**The capacity mechanism recorded for B7/D4 is wrong.** It said lower capacity wins *because* the
+tree can no longer fit interactions that are not there. If that were so, forbidding interactions
+would have removed the reason and the capacity effect with it. It does not: +0.000240 allowed vs
++0.000201 forbidden, the same within noise. With additivity forced a 63-leaf tree is simply a
+63-piece *univariate* step function, and `best_iter` falls 1032 → 676. **This is per-feature shape
+overfitting, not interaction overfitting** — the optimum is coarse-and-slow, which is why ~1000
+rounds of 7-leaf trees wins. Both probes' own hypotheses (I1 ≥ E1, I2 > I1) are refuted; the
+correction to the mechanism is worth more than either would have been.
+
+*Harness gap found:* `scripts/run_local.py` prints the resolved config but never archives it, so
+G1's exact override is unrecoverable from the repo. Playbook §1's rule is that nothing lives only in
+scrollback, and the config **is** the experiment. Fix: write `cfg.json` into the preds dir.
+
+### The OOF↔LB instrument, 10 paired points — CLOSED
+
+| run | OOF | public LB | residual |
+|---|---|---|---|
+| A0 | 0.941660 | 0.94149 | −0.000067 |
+| B5 | 0.944738 | 0.94511 | +0.000219 |
+| H2 | 0.945121 | 0.94536 | +0.000054 |
+| C2 | 0.945225 | 0.94549 | +0.000072 |
+| D4 | 0.945437 | 0.94566 | +0.000012 |
+| I1 | 0.945581 | 0.94570 | −0.000104 |
+| E1 | 0.945642 | 0.94586 | −0.000010 |
+| F2 | 0.945676 | 0.94587 | −0.000037 |
+| E4 | 0.945689 | 0.94588 | −0.000041 |
+| blend | 0.945743 | 0.94588 | −0.000099 |
+| *(G1)* | *0.943401* | *0.94450* | *+0.001057 — **excluded**, see Phase 3* |
+
+**Spearman 0.9970, slope 1.0832, residual σ 0.000103**, against the public split's own paired
+bootstrap SD of 0.000116 — the residual is split noise, so the OOF is an unbiased ranker *within the
+GBDT family*. **The gate is now set at +0.0000949 OOF and does not move again** (§4). The offset is
+still not a trend; its range across these ten is 0.000323 against a paired SD of the same order.
 **The offset is not a trend** — its range is 0.000542 against a 0.000116 paired SD, and playbook §5
 is the post-mortem of reading exactly this kind of series.
 
