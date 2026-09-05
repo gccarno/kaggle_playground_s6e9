@@ -135,6 +135,7 @@ def main():
     run_id = uuid.uuid4().hex[:8]
     out_dir = REPO_ROOT / "experiments" / "preds" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "cfg.json").write_text(json.dumps(cfg, indent=2))
     print(f"run_id={run_id}  cfg={json.dumps(cfg)}\n")
 
     metrics = execute_pipeline(cfg, out_dir)

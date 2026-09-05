@@ -510,7 +510,38 @@ correction to the mechanism is worth more than either would have been.
 
 *Harness gap found:* `scripts/run_local.py` prints the resolved config but never archives it, so
 G1's exact override is unrecoverable from the repo. Playbook §1's rule is that nothing lives only in
-scrollback, and the config **is** the experiment. Fix: write `cfg.json` into the preds dir.
+scrollback, and the config **is** the experiment. Fix: write `cfg.json` into the preds dir. **Fixed**
+— every run since now archives its resolved cfg into `experiments/preds/<run_id>/cfg.json`.
+
+### Phase 4 — the bagging mechanism, tested offline, no slot spent (2026-09-05)
+
+G1's own cfg was still unrecoverable (it predates the fix), so it was reconstructed from G2's notes
+(epochs 25→15 implies G1=25) and E1's TE recipe (G1's notes: "TE features are kept alongside"). As
+**G1r**, this reproduces G1 **exactly** — OOF 0.943401 and all five fold AUCs identical bit-for-bit
+— so the reconstruction is trusted as the strict-twin baseline Phase 3 needed but didn't have.
+
+| probe | change | OOF | Δ vs G1r |
+|---|---|---|---|
+| G1r | reconstructed G1 | 0.943401 | — |
+| **G1rB** | + 3-seed in-fold bagging (F2's treatment) | **0.944074** | **+0.000673** |
+
+**The gate clears by 20x offline.** F2 (the same treatment on E1, a 1000-round GBDT) bought only
++0.000034 — the control for "bagging helps for boring reasons." G1rB's +0.000673 recovers most of
+G1's own +0.00105 LB miss, using nothing but the OOF's own fold structure — the signature Phase 3
+predicted and not the signature of "embeddings are just weaker."
+
+A slot was spent to check it: **G1rB → LB 0.94465** (submission, not blend). Against the GBDT-family
+fit (slope 1.0832, intercept −0.0784), predicted LB is 0.94417 — residual **+0.00048**, against
+G1's own original residual of **+0.00106**. Bagging cut the family-bias gap **by more than half**,
+but did not close it: +0.00048 is still ~5σ against the instrument's 0.000092 residual σ. The LB
+itself barely moved (0.94450 → 0.94465, +0.00015) while OOF moved 4.5x more (+0.000673) — exactly
+what the mechanism predicts, since test predictions were *already* 5-way fold-averaged and had
+little room to gain, while the OOF was scored by one fold-model at a time and had a lot. **Verdict:
+the mechanism is confirmed and explains most, not all, of the miss.** Phase 2b's rejection of G1
+used a biased ruler, but even corrected, embeddings still sit outside the GBDT-family instrument by
+a real margin — a second, smaller family-specific effect remains unexplained. Any future neural leg
+must be seed-bagged in-fold before its OOF is compared to a GBDT's; the residual gap means one
+should not be trusted at instrument-level precision even after bagging.
 
 ### The OOF↔LB instrument, 10 paired points — CLOSED
 
