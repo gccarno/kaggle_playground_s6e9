@@ -543,6 +543,36 @@ a real margin — a second, smaller family-specific effect remains unexplained. 
 must be seed-bagged in-fold before its OOF is compared to a GBDT's; the residual gap means one
 should not be trusted at instrument-level precision even after bagging.
 
+### Phase 5 — the shrinkage axis is also null; E1's hyperparameters were never actually tuned (2026-09-05)
+
+Every capacity probe since Phase 1c changed `num_leaves`. Two Phase-0-era defaults riding along
+unchanged in every one of them — `learning_rate=0.05` and `min_child_samples=20` — were never
+themselves probed, even though Phase 3b's mechanism (capacity wins by buying per-feature SHAPE
+RESOLUTION, not interaction fitting) predicts they might matter: a slower, finer boosting schedule
+or a looser leaf-occupancy floor should, if the mechanism is right, resolve the same univariate
+curves more precisely. Two strict twins of E1, offline, no slot needed:
+
+| probe | change | OOF | Δ vs E1 | best_iter |
+|---|---|---|---|---|
+| J1 | `learning_rate` 0.05 → 0.02 | 0.945653 | +0.000011 **null** | 1996–2780 |
+| K1 | `min_child_samples` 20 → 5 | 0.945602 | **−0.000040** | 702–1525 |
+
+**Both null, one slightly negative.** J1's `best_iter` sits well clear of both 0 and the 12000 cap,
+so the null is not an early-stopping artifact — three times the rounds at 2.5x smaller steps buys
+nothing. K1's small loss says loosening the leaf floor costs a touch of overfitting rather than
+resolving anything finer. **The shape-resolution axis is saturated at E1's recipe, not
+under-tuned** — the Phase-0 defaults for these two knobs happened to already be fine, which is a
+different (weaker) claim than "capacity is the lever," and worth recording precisely because it
+closes off the last untested corner of that mechanism. No slot spent: neither result had a positive
+OOF delta to check against the LB.
+
+**Where this leaves the search.** Encoder, capacity, interaction, ensembling, in-fold variance and
+now shrinkage/leaf-occupancy are all closed. The 0.94588 champion is at or very near the ceiling
+this feature set and model family can reach; the ≈0.0002 gap to the well-supported ~0.9460 frontier
+(§8, 1.7σ of the public paired SD) is consistent with noise, not an unfound lever. Any further gain
+would need a genuinely new representation (the embedding axis, Phase 2b–4, is measured and real but
+below the pool floor) or a structural fact about the generator not yet found.
+
 ### The OOF↔LB instrument, 10 paired points — CLOSED
 
 | run | OOF | public LB | residual |
