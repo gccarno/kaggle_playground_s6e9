@@ -149,12 +149,12 @@ worth modelling).
 | `Home_Charging_Possible` | binary | 2 | 0.55082 | |
 | `Age` | int 25–69 | 45 | 0.54788 | non-monotone |
 | `Range_Anxiety_Level` | ordinal | 3 | 0.54510 | High ⊂ Home_Charging=No (2194/2194 in train) |
-| `Charging_Stations_Near_Home` | int 0–14 | 15 | 0.52407 | ~flat in logit — likely noise |
+| `Charging_Stations_Near_Home` | int 0–14 | 15 | 0.52407 | flat only in a LINEAR screen — real non-monotone signal, see Phase 6 |
 | `City_Type` | cat | 3 | 0.52345 | |
-| `Charging_Stations_Near_Work` | int 0–19 | 20 | 0.51272 | ~flat in logit — likely noise |
+| `Charging_Stations_Near_Work` | int 0–19 | 20 | 0.51272 | flat only in a LINEAR screen — real non-monotone signal, see Phase 6 |
 | `Current_Car_Type` | cat | 4 | 0.51037 | |
-| `Number_of_Cars_Owned` | int 1–4 | 4 | 0.50625 | ~flat in logit — likely noise |
-| `Gender` | cat | 3 | 0.50461 | ~flat — likely noise |
+| `Number_of_Cars_Owned` | int 1–4 | 4 | 0.50625 | flat only in a LINEAR screen — real non-monotone signal, see Phase 6 |
+| `Gender` | cat | 3 | 0.50461 | ~flat — weakest of the four, still likely noise |
 
 ### The structural finding — corrected in Phase 1
 
@@ -211,6 +211,8 @@ per-value encoding, not shape and not interaction.**
   archive → submit → log. For GPU legs and the champion's reproducible record.
 - `scripts/stack_logit.py`, `leg_probe.py`, `leg_swap.py`, `leg_diversity.py`, `subset_ceiling.py`,
   `compare_oof.py`, `public_gap.py` — the ensemble/analysis toolkit, ported from S6E8.
+- `scripts/shap_champion.py` — read-only SHAP diagnostic on E1's fold-0 model (Phase 6). Not a
+  probe: touches no OOF/LB, exists to surface structure the aggregate structural tests average away.
 - `experiments/runs.csv` — **tracked in git**, append-only, one row per run. The most valuable asset
   in the repo.
 - `experiments/preds/<run_id>/` — gitignored per-run `oof_proba_<learner>.csv` /
@@ -566,12 +568,47 @@ different (weaker) claim than "capacity is the lever," and worth recording preci
 closes off the last untested corner of that mechanism. No slot spent: neither result had a positive
 OOF delta to check against the LB.
 
-**Where this leaves the search.** Encoder, capacity, interaction, ensembling, in-fold variance and
-now shrinkage/leaf-occupancy are all closed. The 0.94588 champion is at or very near the ceiling
-this feature set and model family can reach; the ≈0.0002 gap to the well-supported ~0.9460 frontier
-(§8, 1.7σ of the public paired SD) is consistent with noise, not an unfound lever. Any further gain
-would need a genuinely new representation (the embedding axis, Phase 2b–4, is measured and real but
-below the pool floor) or a structural fact about the generator not yet found.
+**Where this leaves the search, before Phase 6.** Encoder, capacity, interaction, ensembling,
+in-fold variance and shrinkage/leaf-occupancy are all closed. The 0.94588 champion is at or very
+near the ceiling this feature set and model family can reach; the ≈0.0002 gap to the well-supported
+~0.9460 frontier (§8, 1.7σ of the public paired SD) is consistent with noise, not an unfound lever.
+Any further gain would need a genuinely new representation (the embedding axis, Phase 2b–4, is
+measured and real but below the pool floor) or a structural fact about the generator not yet found.
+
+### Phase 6 — SHAP catches what the linear screen missed: the "noise" columns aren't (2026-09-05)
+
+Every prior read of feature importance was aggregate and structure-blind: single-feature raw-value
+AUC (§6's table), the Phase 0 GLM's linear coefficients, and residual-variance ratios keyed on
+exact or binned values. None of these can see a real per-value effect that happens to be
+non-monotonic in the raw ordering unless a value→target lookup is what's specifically being
+tested for. `scripts/shap_champion.py` fits E1's exact recipe on fold 0 and reads `TreeExplainer`
+output directly instead — a genuinely different lens, not a re-run of an existing test.
+
+**Two things came out of it.** First, the top SHAP *interaction* pair by far is
+`Environmental_Concern_Level × Subsidy_Available` (mean |interaction| 0.163, next-highest 0.088) —
+the tree clearly builds this join internally. This does not contradict Phase 3b's additive-only
+result (forbidding it costs ~nothing): the interaction the tree constructs is evidently redundant
+with what the univariate terms already encode, not new information. Confirmation, not a lever.
+
+Second, and new: the binned SHAP dependence table for `Charging_Stations_Near_Home` (15 distinct
+values) shows a real non-monotonic swing — mean SHAP dips to **−0.073** at values 3–7 and rises to
+**+0.094** at 13, on bins of 4,000–20,000 rows each, far past sampling noise. `Number_of_Cars_Owned`
+and `Charging_Stations_Near_Work` show the same shape of pattern, smaller. This is the identical
+class of blind spot that hid `Annual_Income_USD`'s lookup table from the Phase 0 GLM — a screen
+that assumes near-linearity cannot see a non-monotonic per-value effect, whatever its size.
+
+**L1** (strict twin of E1, `drop_noise=True`, removing all four flagged columns) tests whether this
+is real: **OOF 0.945525, −0.000117** — about 3x the interim gate, and roughly 15x what the same
+drop cost on the unengineered baseline (B3: 0.941648 vs A0 0.941656, ≈0). **The columns are not
+noise; B3's null verdict was an artifact of testing them at a baseline with too little capacity and
+too few rounds to extract a small non-monotonic effect.** At champion capacity (7 leaves, ~1000+
+rounds, "coarse and slow"), the tree already carves each of these low-cardinality values into its
+own effective bucket — unlike income's 13,214 values, 15-20 distinct values is cheap for a tree to
+split on natively. That is consistent with C7's null result for adding explicit TE on top of these
+columns (−0.000075): the per-value structure is real, but it is already fully captured by ordinary
+splits, so an encoder adds nothing but redundant, noisier features. **No new OOF lever — E1 already
+keeps these columns — but the §6 feature table's "likely noise" label was wrong, and now corrected.**
+No slot spent: this closes a labeling error, not a modeling gap.
 
 ### The OOF↔LB instrument, 10 paired points — CLOSED
 
