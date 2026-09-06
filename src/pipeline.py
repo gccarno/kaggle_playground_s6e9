@@ -48,7 +48,7 @@ def _kaggle_data_dir():
     guess = Path("/kaggle/input/playground-series-s6e9")
     if (guess / "train.csv").exists():
         return guess
-    hits = list(Path("/kaggle/input").glob("*/train.csv"))
+    hits = list(Path("/kaggle/input").glob("**/train.csv"))
     if len(hits) == 1:
         return hits[0].parent
     raise FileNotFoundError(
