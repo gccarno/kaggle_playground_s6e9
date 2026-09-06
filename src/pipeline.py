@@ -37,8 +37,25 @@ ID = "id"
 
 ON_KAGGLE = Path("/kaggle/input").exists()
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = (Path("/kaggle/input/playground-series-s6e9") if ON_KAGGLE
-            else REPO_ROOT / "data")
+
+
+def _kaggle_data_dir():
+    """The competition's mount point under /kaggle/input isn't always the slug in
+    kernel-metadata.json's competition_sources -- found by direct observation (P0_smoke
+    v2 hit FileNotFoundError against /kaggle/input/playground-series-s6e9/train.csv on a
+    freshly pushed kernel). Search for whichever subdirectory actually holds train.csv
+    instead of hardcoding a path that has already been wrong once."""
+    guess = Path("/kaggle/input/playground-series-s6e9")
+    if (guess / "train.csv").exists():
+        return guess
+    hits = list(Path("/kaggle/input").glob("*/train.csv"))
+    if len(hits) == 1:
+        return hits[0].parent
+    raise FileNotFoundError(
+        f"could not find train.csv under /kaggle/input (guessed {guess}, found {hits})")
+
+
+DATA_DIR = _kaggle_data_dir() if ON_KAGGLE else REPO_ROOT / "data"
 OUT_DIR = Path(os.environ.get("S6E9_OUT", "/kaggle/working" if ON_KAGGLE else
                               REPO_ROOT / ".kaggle_output" / "scratch"))
 
