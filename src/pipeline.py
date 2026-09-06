@@ -56,7 +56,7 @@ RAW_NUM = ["Age", "Annual_Income_USD", "Daily_Commute_km", "Number_of_Cars_Owned
 # ---------------------------------------------------------------------- config
 DEFAULTS = {
     "run_tag": "baseline",
-    "learner": "lgb",                # lgb | xgb | cat | glm | emb
+    "learner": "lgb",                # lgb | xgb | cat | glm | emb | ebm
     "model_seed": SEED,
     "seed_bag": 1,                   # average predictions over this many model seeds per fold
     "n_folds": N_FOLDS,
@@ -102,6 +102,18 @@ DEFAULTS = {
     "emb_batch": 4096,
     "emb_epochs": 40,
     "emb_patience": 5,
+
+    # -- "ebm" learner only: an Explainable Boosting Machine (GA2M). The architecture
+    # most directly aligned with the confirmed-additive generator (README section 6:
+    # GLM interactions +0.000033, additive_only constraint costs ~nothing, 8/9 joint
+    # keys land at 0.85-0.95) -- interactions=0 makes it a pure additive GAM by
+    # construction rather than a tree that merely happens not to need interactions.
+    "ebm_interactions": 0,
+    "ebm_max_bins": 256,
+    "ebm_learning_rate": 0.02,
+    "ebm_max_rounds": 20000,
+    "ebm_outer_bags": 14,
+    "ebm_early_stopping_rounds": 100,
 
     "cat_cols": [],                  # columns ALSO handed to the learner as native
                                      # high-cardinality categoricals (see base_features)
@@ -396,6 +408,21 @@ def fit_predict(cfg, Xtr, ytr, Xva, yva, Xte, feats_cat):
 
     if name == "emb":
         return _fit_emb(cfg, Xtr, ytr, Xva, yva, Xte, feats_cat)
+
+    if name == "ebm":
+        from interpret.glassbox import ExplainableBoostingClassifier
+        A, B, C = Xtr.copy(), Xva.copy(), Xte.copy()
+        for c in feats_cat:
+            if c in A.columns:
+                A[c], B[c], C[c] = A[c].astype(str), B[c].astype(str), C[c].astype(str)
+        m = ExplainableBoostingClassifier(
+            random_state=cfg["model_seed"], n_jobs=-1,
+            interactions=cfg["ebm_interactions"], max_bins=cfg["ebm_max_bins"],
+            learning_rate=cfg["ebm_learning_rate"], max_rounds=cfg["ebm_max_rounds"],
+            outer_bags=cfg["ebm_outer_bags"],
+            early_stopping_rounds=cfg["ebm_early_stopping_rounds"])
+        m.fit(A, ytr)
+        return m.predict_proba(B)[:, 1], m.predict_proba(C)[:, 1], 0
 
     if name == "glm":
         from sklearn.linear_model import LogisticRegression

@@ -610,6 +610,43 @@ splits, so an encoder adds nothing but redundant, noisier features. **No new OOF
 keeps these columns — but the §6 feature table's "likely noise" label was wrong, and now corrected.**
 No slot spent: this closes a labeling error, not a modeling gap.
 
+### Phase 7 — a new architecture confirms additivity harder than any prior test (2026-09-05)
+
+Every model tried through Phase 6 was a tree ensemble (LightGBM, XGBoost, CatBoost) or a neural
+net (the embedding MLP). None is a genuine test of "is a pure additive model sufficient," because
+a tree ensemble's additivity was always a *behavioral* finding (it happens not to use the
+interactions it could build) rather than a *structural* one. An Explainable Boosting Machine
+(GA2M, `interpret-core`) with `interactions=0` is additive **by construction** — it cannot build an
+interaction at all — so it is the first architecture that actually tests the hypothesis rather than
+observing that another model declines to falsify it.
+
+**M1** (EBM, `interactions=0`, on E1's exact TE feature set): **OOF 0.945550**, fold AUCs
+`[0.944684, 0.945266, 0.946483, 0.94586, 0.945469]` against E1's
+`[0.944717, 0.945267, 0.946656, 0.945962, 0.945649]` — **within 0.0002 on every single fold**, total
+gap **−0.000092**. A cyclic-gradient-boosted sum of smooth univariate step functions, fit by a
+completely different optimizer than LightGBM's greedy leaf-wise trees, lands on almost exactly the
+same function. This is the strongest evidence yet for additivity: not "forbidding interactions
+costs little" but "an architecture incapable of interactions matches one that permits them,"
+independently implemented.
+
+(`outer_bags` — EBM's internal bagging count — was dropped 14→4→1 across three runs purely for
+wall-clock on 668k rows; 14→4 changed folds 0–1 by <0.00001, confirming it doesn't affect the
+result, so 1 was used for the logged OOF.)
+
+**It does not help the ensemble, and the reason confirms §6's discriminator rather than
+contradicting it.** Spearman correlation between M1 and E1's OOF logits is **0.9966** — inside the
+existing GBDT pack's own internal range (0.9922–0.9995) — with disagreement at 0.5% and solo
+strength within 0.0001 of the pool. That is the near-twin signature, not decorrelation: a model
+that correctly learns the same additive truth makes the same mistakes, because the residual is the
+same irreducible noise. Confirmed directly rather than inferred: adding M1 to the champion 3-leg
+rank-mean blend moves OOF **0.945743 → 0.945744, +0.000001, null**. No slot spent — this is an ADD
+test, not a submission-worthy result.
+
+**Verdict:** the additive-generator finding is now confirmed by four independent lines of evidence
+(GLM interactions, the additive_only tree constraint, joint-key residual ratios, and now an
+architecturally-additive model matching the champion) and does not open a new ensemble lever — a
+fourth confirmation is not a fourth data point for the stack.
+
 ### The OOF↔LB instrument, 10 paired points — CLOSED
 
 | run | OOF | public LB | residual |
