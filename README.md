@@ -647,7 +647,46 @@ test, not a submission-worthy result.
 architecturally-additive model matching the champion) and does not open a new ensemble lever — a
 fourth confirmation is not a fourth data point for the stack.
 
-### The OOF↔LB instrument, 10 paired points — CLOSED
+### Phase 8 — populating playbook §7's wall plot; M1 submitted, one slot spent (2026-09-05)
+
+Playbook §7: "plot solo score against disagreement rate across every model you own... when that
+correlation is strongly negative and no point sits in the useful quadrant, the ensemble axis is
+closed." Feature/representation exploration is closed (Phases 5–6); this phase asks the
+architecture question directly, the way §7 prescribes — not by assuming the wall, but by measuring
+it with structurally distinct model families.
+
+| leg | architecture | solo OOF | corr vs E1 | disagreement | ADD to 3-leg blend |
+|---|---|---|---|---|---|
+| E1/E4/E5 | GBDT (lgb/xgb/cat) | 0.9456–0.9457 | 0.9922–0.9995 (internal) | — | champion pool |
+| G1rB | token embedding (neural) | 0.944074 | ~0.95 (G1) | — | below pool floor |
+| **M1** | **EBM (GA2M, additive)** | **0.945550** | **0.9966** | **0.512%** | **0.945743→0.945744, null** |
+| **N1** | **plain dense MLP** | **0.944912** | **0.9921** | **1.147%** | **0.945743→0.945700, −0.000043** |
+
+Two new, structurally opposite architectures this phase, both landing exactly where §7 predicts:
+**M1 is strong-but-correlated** (inside the GBDT pack's own internal correlation range — a model
+that learns the same additive truth makes the same mistakes) and **N1 is weak-and-still-correlated**
+— a plain feedforward net given the identical TE representation, no embeddings at all. N1's ADD
+result is the sharper confirmation of the two: adding it to the champion blend *loses* −0.000043,
+because 1.147% disagreement without competitive solo strength is, per §7, "the model being wrong in
+new places," not diversity — an equal-weight combiner cannot tell the difference and pays for it.
+Across four architectures now (GBDT, token-embedding neural net, GA2M, plain neural net), zero sit
+in the useful strength-and-decorrelation quadrant. **The ensemble axis is closed by measurement, not
+assumption**, matching §0's sharpened §7 prior for this competition almost exactly.
+
+(A real pipeline.py bug surfaced building N1: `emb_cols=[]` built a `(0, 0)` token placeholder
+instead of `(n_rows, 0)`, crashing on the first batch index — fixed. Also: without per-value
+embeddings to overfit through, the net does not early-stop by epoch ~5–9 the way G1 did;
+`emb_epochs` was cut 40→15 purely for wall-clock, matching G2's schedule length.)
+
+**One slot spent, and it extends Phase 3/4's family-generalization finding to a third family.** M1
+submitted: **LB 0.94568**. Against the GBDT-family instrument fit (slope 1.0832, intercept
+−0.0784), predicted LB is 0.94577 — residual **−0.00009**, inside the instrument's own noise band
+(~0.0001σ). Unlike the neural embedding leg (+0.00048 to +0.00106, a real family-specific bias),
+**EBM's OOF→LB relationship behaves exactly like a GBDT.** This narrows Phase 3's mechanism: the
+bias is specific to early-stopped neural nets' fold-averaging variance (one fold-model scores an OOF
+row, five score a test row), not to "any non-tree model" — a boosting-based GAM with no such
+training-time variance asymmetry needs no correction at all. N1 was not submitted: its OOF was
+already conclusively negative for the pool before spending a paired point on it.
 
 | run | OOF | public LB | residual |
 |---|---|---|---|

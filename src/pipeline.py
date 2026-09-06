@@ -489,7 +489,11 @@ def _fit_emb(cfg, Xtr, ytr, Xva, yva, Xte, feats_cat):
         vocabs.append(len(mapping) + 1)
         for split, X in (("tr", Xtr), ("va", Xva), ("te", Xte)):
             Ti[split].append(X[c].map(mapping).fillna(0).astype(np.int64).values)
-    Tt = {k: (np.stack(v, 1) if v else np.zeros((len(Ti[k][0]) if v else 0, 0), np.int64))
+    # emb_cols=[] (a plain dense MLP, no token embeddings at all) leaves Ti[k] empty for
+    # every split -- the placeholder must still carry the split's real ROW COUNT so that
+    # xt[idx] below indexes correctly, not a (0, 0) array shared by every split.
+    n_rows = {"tr": len(Xtr), "va": len(Xva), "te": len(Xte)}
+    Tt = {k: (np.stack(v, 1) if v else np.zeros((n_rows[k], 0), np.int64))
           for k, v in Ti.items()}
 
     class Net(nn.Module):
