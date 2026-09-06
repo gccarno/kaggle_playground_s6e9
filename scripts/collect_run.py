@@ -19,7 +19,7 @@ because S6E7 needed a code edit every time a learner was added:
   * prediction artifacts are DISCOVERED by glob (oof_proba_*.csv / test_proba_*.csv)
     instead of being listed learner by learner.
 """
-import argparse, csv, json, re, shutil, subprocess, sys, time, uuid
+import argparse, csv, json, os, re, shutil, subprocess, sys, time, uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -62,7 +62,15 @@ PRED_GLOBS = ["oof_proba_*.csv", "test_proba_*.csv"]
 
 def run(cmd):
     print(f"$ {' '.join(cmd)}")
-    return subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_ROOT)
+    # PYTHONIOENCODING -- the kaggle-cli SUBPROCESS is itself a Python program, and on a
+    # non-UTF8 Windows console it crashes with UnicodeEncodeError trying to print a
+    # filename/status line containing a character its own stdout codepage can't
+    # represent -- after the files it was reporting had already downloaded successfully.
+    # This forces UTF-8 in that child process regardless of the console's codepage.
+    # encoding="utf-8" on our OWN read of its output is a second, independent guard.
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", cwd=REPO_ROOT, env=env)
 
 
 def git_commit():
