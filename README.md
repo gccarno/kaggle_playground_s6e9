@@ -836,3 +836,47 @@ quadrant. Every additional architecture at this point is confirmatory, not explo
 has now been measured from trees, GAMs, plain and embedding-based neural nets, oblivious decision
 ensembles, an in-context foundation model, a retrieval method, and two transformer variants, all
 converging on the same two failure modes playbook §7 predicted from the first architecture tested.
+
+### Phase 11 — three instrument-stress submissions, no new champion, one genuine surprise (2026-09-06)
+
+Three slots spent, deliberately, on artifacts that already existed with zero incremental compute
+(`submission.csv` sitting unused in three preds dirs) — playbook §1's "burn the slots" rule applied
+to points that sharpen the OOF→LB instrument rather than to new champion candidates. Fit used: the
+10-point GBDT-family regression refit here from the logged pairs, slope **1.0832**, intercept
+**−0.0784**, residual σ **0.000092** — matches §4's numbers to within rounding.
+
+| probe | OOF | predicted LB | actual LB | residual |
+|---|---|---|---|---|
+| **logit_stack** | 0.945719 | 0.94595 | **0.94588** | −0.00007 |
+| **L1** | 0.945525 | 0.94574 | **0.94577** | +0.00003 |
+| **N1** | 0.944912 | 0.94508 | **0.94497** | **−0.00011** |
+
+**logit_stack confirms "fixed beats fitted" harder than OOF alone could.** The fixed 3-leg rank-mean
+blend (OOF 0.945743, champion) and this fitted 6-leg logit stack (OOF 0.945719) differ by +0.000024
+offline — under the near-twin paired resolution (0.000027), a wash. On the LB they land on the
+**exact same score, 0.94588**, to five decimals. Playbook §6's elbow-at-3 call is now confirmed on
+the actual leaderboard, not just inferred from an OOF gap too small to trust.
+
+**L1 confirms Phase 6's SHAP finding on the LB, cleanly.** Dropping the four SHAP-flagged
+"not-actually-noise" columns cost −0.000117 OOF against E1; on the LB it cost E1 0.94586 → L1
+0.94577, **−0.00009**, and lands at residual +0.00003 — inside the GBDT-family band, exactly as
+expected for a LightGBM run that changes only which columns it sees. The deliberately-worse-model
+check (H2's trick, applied to a different axis: feature retention, not encoding) holds.
+
+**N1 is the interesting one, and it argues against the naive form of the neural-bias mechanism.**
+G1 (embedding MLP, early-stopped epoch 3–6) sits at residual **+0.00105**; G1rB (same net, in-fold
+bagged) at **+0.00048** — both *positive*, read as "OOF, scored by one fold-model, understates a
+high-variance learner that the 5-way test-time average smooths out." N1 is a plain dense MLP with
+no per-value embeddings, trained through most of its epoch budget rather than early-stopping at
+epoch 3–9 the way G1 did (Phase 8's note). If the positive bias is caused by *premature stopping*
+specifically, a more fully-trained net should show little or none of it. N1 shows **−0.00011** —
+not just smaller, but the **opposite sign**, ~1.2σ of the GBDT band and in a direction the "fold-
+averaging rescues an undertrained model" story does not predict. This is a real data point against
+reading G1/G1rB's bias as "neural nets get an LB bonus" in general: it looks specific to nets that
+are *still changing fast* when each fold stops, not to gradient-descent training as such. Consistent
+with, not yet conclusive of, the mechanism — one point, and N1's own solo OOF (0.944912) is far
+enough below the pool floor that this is read as an instrument point, not grounds for revisiting
+the closed ensemble axis.
+
+No champion moved. `experiments/runs.csv` rows `718b2ed3`, `04d11559`, `83b7b495` now carry their
+`public_lb_score`.
