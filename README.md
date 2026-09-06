@@ -717,3 +717,77 @@ LB placed it between B5 and C2, to within 0.00002 of the fit. A deliberately wor
 ranked correctly-worse is evidence a monotone run of improvements cannot supply. This is what
 playbook §1's "burn the slots" rule is actually for — the cheapest paired points are the ones
 you were not going to ship anyway.
+
+### Phase 9 — three more TabBench/playbook architectures; the wall holds seven times over (2026-09-06)
+
+User request: test the top TabBench leaderboard architectures, and RealMLP/NODE from playbook §7's
+"mostly fail" list, before accepting the architecture axis is closed. TabBench's top 3 are all
+tabular foundation models: **Seldon** is proprietary/API-only, no open weights — skipped, no access.
+**TabPFN v3** requires the user's own browser login and license acceptance at priorlabs.ai to even
+download weights — that's account authentication, not something to automate, and skipped on the
+user's call. **TabICL v2** is open (Apache 2.0) and was tested in full.
+
+**TabICL v2 (in-context tabular foundation model, `tabicl` pip package).** Installs with zero new
+dependencies. Added as a proper `pipeline.py` learner (`tabicl`) with a context-size cap and
+chunked prediction, since peak memory is driven by (context + query) length together, not context
+alone — a real local OOM boundary was mapped around 250–280k combined length on a 6.4GB laptop GPU.
+
+- At 100,000 context rows (18.7% of fold 0's training data) against the **full** validation fold:
+  **OOF 0.944550**, within **0.000167** of E1's own fold-0 score (0.944717), using under a fifth of
+  the data. Correlation with E1 is **0.9956**, disagreement **0.75%** — another near-twin.
+- Pushing to 450,000 context (84% of the data) on Kaggle's T4 was attempted to see whether more data
+  lets it *exceed* the champion. It didn't get the chance to answer that: each 5,000-row prediction
+  chunk took **~53 minutes** — the full validation set would have needed ~24 hours — and Kaggle
+  cancelled the session after 2 of 27 chunks. **This is itself the finding**: TabICL's inference
+  cost scales far worse than linearly with context length (a 4.5x context increase from the 100k
+  run produced roughly a 150x per-row slowdown, not ~4.5x), making "test at true full scale"
+  practically infeasible for this architecture on this hardware. The 100k result stands as the real
+  data point, and it already answers the question the 450k run was chasing: near-champion, not
+  exceeding it, using a fraction of the data.
+- Getting the never-before-used `s6e9-model.ipynb` Kaggle kernel working for this competition (it
+  did not exist on Kaggle before this session — verified) surfaced and fixed five real
+  infrastructure bugs, all committed: two wrong hardcoded Kaggle data-mount paths in `pipeline.py`
+  (the true mount is nested under `/kaggle/input/competitions/<slug>/`, not the top-level path every
+  other assumption expected), a `collect_run.py` crash from the kaggle-cli subprocess hitting a
+  non-UTF8 Windows console codepage (fixed via `PYTHONIOENCODING`), and the `_fit_emb` `(0,0)`-shape
+  bug from Phase 8. One slot spent on M1 (Phase 8) used this same kernel infrastructure to extend
+  the family-generalization finding; P1 (this TabICL run) was correctly scoped to skip the test set
+  and submission entirely, since it was answering an architecture question, not shipping a
+  candidate — so no slot was at risk in the 24-hour miscalculation, only Kaggle GPU-hours.
+
+**RealMLP (`pytabkit`, tuned-defaults MLP) and NODE (`pytorch_tabular`, neural oblivious decision
+ensembles).** Both already installed locally from prior competitions. Both single-fold diagnostics
+on E1's exact TE representation and the real frozen fold-0 split, evaluated on the full validation
+fold — the same protocol as every other architecture this session:
+
+| leg | architecture | n (of 534,932) | solo OOF | Δ vs E1 | corr vs E1 | disagreement |
+|---|---|---|---|---|---|---|
+| **TabICL** | in-context foundation model | 100,000 | 0.944550 | −0.000167 | 0.9956 | 0.75% |
+| **RealMLP** | tuned-default MLP | 50,000 | 0.939127 | −0.005590 | 0.9482 | 1.59% |
+| **NODE** | neural oblivious decision ensemble | 50,000 | 0.935101 | −0.009616 | 0.9552 | 5.76% |
+
+RealMLP and NODE are the clearest weak-and-decorrelated points measured all session: NODE's 5.76%
+disagreement is the highest of any architecture tested, paired with the *weakest* solo score of any
+architecture tested — playbook §7's "high disagreement without competitive solo strength is the
+model being wrong in new places" stated as plainly as the data gets. Neither was pushed to a
+larger/fairer scale (RealMLP could likely close some of this gap with the full 535k rows and more
+epochs, NODE likely less so given its architecture is a poorer fit for this response surface) —
+scaling up was not attempted because both already landed unambiguously in the known-losing quadrant,
+and playbook §5 says not to keep spending to sharpen a conclusion the data has already made.
+
+*Harness friction, for the record:* getting RealMLP and NODE running locally took repeated retries
+against real environment issues, not model problems — RealMLP's GPU path had highly variable
+first-call CUDA/cuDNN latency (worked reliably switched to CPU), NODE's default `entmax15`
+choice-function hung deterministically (switched to `sparsemax`/`sparsemoid`, which is a listed
+valid choice, not a workaround), and `pytorch_tabular`'s continuous-column scaler crashed against
+pandas 3.0's stricter `LossySetitemError` (an int64 column being assigned floats used to silently
+upcast; fixed by casting to `float64` before handing data to the library) — a direct downstream
+consequence of the numpy/pandas/scikit-learn bump from installing `shap` in Phase 6.
+
+**Verdict: seven architectures now tested this session** (GBDT, token-embedding neural net, EBM,
+plain MLP, TabICL, RealMLP, NODE) **spanning trees, GAMs, plain and embedding-based neural nets,
+oblivious decision ensembles, and an in-context foundation model. Zero land in the useful
+strong-and-decorrelated quadrant.** Playbook §7's wall is not assumed here; it is measured, from
+every major inductive bias family available, at the representation this repo already found. The
+architecture axis is closed for this dataset until a genuinely new representation is found —
+consistent with §0's sharpened prior for this competition from day one.
