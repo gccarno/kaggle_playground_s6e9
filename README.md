@@ -791,3 +791,48 @@ strong-and-decorrelated quadrant.** Playbook §7's wall is not assumed here; it 
 every major inductive bias family available, at the representation this repo already found. The
 architecture axis is closed for this dataset until a genuinely new representation is found —
 consistent with §0's sharpened prior for this competition from day one.
+
+### Phase 10 — ModernNCA and TabTransformer; nine architectures, still zero in the useful quadrant (2026-09-06)
+
+User request: also test ModernNCA and TabTransformer. Neither has a pip package for this
+architecture (ModernNCA has none at all; TabTransformer is via `pytorch_tabular`, already used for
+NODE). ModernNCA was adapted from the S6E8 implementation (`gcarno/s6e8-mnca`) — same retrieval
+mechanism (soft-kNN over a learned metric space, self-retrieval masked, candidates resampled every
+step), rebuilt on a plain MLP encoder over this repo's TE representation rather than S6E8's
+per-value token embeddings, since the retrieval mechanism is what's being tested here, not S6E8's
+tokenizer.
+
+**Local GPU reliability broke down entirely for this round** — 7+ retries on ModernNCA (1 clean
+success), TabTransformer never completed locally. Both are raw-PyTorch or Lightning code with no
+multiprocessing DataLoader workers (ruling out the Windows spawn-hang theory used to explain
+NODE's issue), so this looks like first-CUDA-call latency variance on this laptop GPU, severe
+enough this round that continuing to retry stopped being worth it. Moved both to the proven Kaggle
+kernel infrastructure instead — clean success on the first push. (The long wall-clock, ~90 minutes,
+was Kaggle GPU queue time, not compute: actual training was 422s for ModernNCA's 15 epochs and 71s
+for TabTransformer's fit.)
+
+Same protocol as every architecture this session: E1's exact TE representation, real frozen fold-0
+split, full validation fold, test set and submission skipped entirely (architecture research, not a
+shipping candidate):
+
+| leg | architecture | n (of 534,932) | solo OOF | Δ vs E1 | corr vs E1 | disagreement |
+|---|---|---|---|---|---|---|
+| **ModernNCA** | learned-metric soft-kNN retrieval | 300,000 | 0.944310 | −0.000407 | 0.9922 | 0.84% |
+| **TabTransformer** | column-attention transformer | 150,000 | 0.942877 | −0.001840 | 0.9889 | 1.61% |
+
+**ModernNCA is the third strong-and-correlated near-twin** (joining EBM and TabICL) — a genuinely
+different mechanism (retrieval, not function approximation) converging on essentially the same
+answer as the tree ensemble, the cleanest possible restatement of "representation dominates
+architecture." It was also still improving at epoch 14 of 15 with no early-stopping trigger yet —
+more epochs would likely close some of the remaining −0.0004, but not past the correlation ceiling
+that already puts it in the near-twin camp regardless. **TabTransformer lands where RealMLP did**:
+weak and moderately decorrelated, not in the useful quadrant, and not scaled up further for the
+same reason as Phase 9's RealMLP/NODE — playbook §5's rule against spending more to sharpen an
+already-clear conclusion.
+
+**Verdict: nine architectures now tested this session**, adding a retrieval-based method and a
+second transformer variant to Phase 9's seven. Still zero in the useful strong-and-decorrelated
+quadrant. Every additional architecture at this point is confirmatory, not exploratory — the wall
+has now been measured from trees, GAMs, plain and embedding-based neural nets, oblivious decision
+ensembles, an in-context foundation model, a retrieval method, and two transformer variants, all
+converging on the same two failure modes playbook §7 predicted from the first architecture tested.
