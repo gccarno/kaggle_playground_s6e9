@@ -56,7 +56,7 @@ RAW_NUM = ["Age", "Annual_Income_USD", "Daily_Commute_km", "Number_of_Cars_Owned
 # ---------------------------------------------------------------------- config
 DEFAULTS = {
     "run_tag": "baseline",
-    "learner": "lgb",                # lgb | xgb | cat | glm | emb | ebm
+    "learner": "lgb",                # lgb | xgb | cat | glm | emb | ebm | tabicl
     "model_seed": SEED,
     "seed_bag": 1,                   # average predictions over this many model seeds per fold
     "n_folds": N_FOLDS,
@@ -114,6 +114,18 @@ DEFAULTS = {
     "ebm_max_rounds": 20000,
     "ebm_outer_bags": 14,
     "ebm_early_stopping_rounds": 100,
+
+    # -- "tabicl" learner only: TabICL v2, an in-context tabular foundation model
+    # (github.com/soda-inria/tabicl). No gradient-descent training happens here at all --
+    # "fitting" just stores the context rows, and inference attends over them per query
+    # batch. tabicl_max_context caps how many TRAINING-FOLD rows are shown as context (a
+    # random draw, capped for GPU memory -- not a leak, since it is an unsupervised
+    # subsample of rows already restricted to the training fold). tabicl_predict_chunk
+    # bounds queries-per-forward-pass independently of context size, since this library's
+    # peak memory is driven by (context + query) length together, not context alone.
+    "tabicl_max_context": 535000,
+    "tabicl_predict_chunk": 15000,
+    "tabicl_n_estimators": 4,
 
     "cat_cols": [],                  # columns ALSO handed to the learner as native
                                      # high-cardinality categoricals (see base_features)
@@ -423,6 +435,27 @@ def fit_predict(cfg, Xtr, ytr, Xva, yva, Xte, feats_cat):
             early_stopping_rounds=cfg["ebm_early_stopping_rounds"])
         m.fit(A, ytr)
         return m.predict_proba(B)[:, 1], m.predict_proba(C)[:, 1], 0
+
+    if name == "tabicl":
+        from tabicl import TabICLClassifier
+        A, B, C = Xtr.copy(), Xva.copy(), Xte.copy()
+
+        cap = int(cfg["tabicl_max_context"])
+        if len(A) > cap:
+            keep = np.random.default_rng(cfg["model_seed"]).choice(len(A), size=cap, replace=False)
+            A, ytr = A.iloc[keep], ytr[keep]
+
+        m = TabICLClassifier(random_state=cfg["model_seed"], n_estimators=cfg["tabicl_n_estimators"])
+        m.fit(A, ytr)
+
+        def _chunked_proba(X):
+            bs = int(cfg["tabicl_predict_chunk"])
+            out = np.zeros(len(X))
+            for k in range(0, len(X), bs):
+                out[k:k + bs] = m.predict_proba(X.iloc[k:k + bs])[:, 1]
+            return out
+
+        return _chunked_proba(B), _chunked_proba(C), 0
 
     if name == "glm":
         from sklearn.linear_model import LogisticRegression
