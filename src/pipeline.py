@@ -59,6 +59,23 @@ DATA_DIR = _kaggle_data_dir() if ON_KAGGLE else REPO_ROOT / "data"
 OUT_DIR = Path(os.environ.get("S6E9_OUT", "/kaggle/working" if ON_KAGGLE else
                               REPO_ROOT / ".kaggle_output" / "scratch"))
 
+
+def _origin_data_path():
+    """The 10,000-row source dataset the competition's generator was fit to
+    (itzzomkar/ev-adoption-behavior-and-range-anxiety on Kaggle). Only resolved when
+    use_origin_extra asks for it."""
+    guess = REPO_ROOT / "data" / "EV_Adoption_and_Range_Anxiety_Dataset.csv"
+    if guess.exists():
+        return guess
+    if ON_KAGGLE:
+        hits = list(Path("/kaggle/input").glob("**/EV_Adoption_and_Range_Anxiety_Dataset.csv"))
+        if hits:
+            return hits[0]
+    raise FileNotFoundError(
+        "origin dataset not found -- `kaggle datasets download -d "
+        "itzzomkar/ev-adoption-behavior-and-range-anxiety -p data --unzip` locally, or "
+        "attach it to the kernel")
+
 # Measured flat-in-logit in Phase 0 (README.md section 6); candidates for removal, but
 # removal is a PROBE (`drop_noise`), not an assumption baked into the pipeline.
 NOISE_CANDIDATES = ["Gender", "Number_of_Cars_Owned",
@@ -84,6 +101,22 @@ DEFAULTS = {
     "drop_noise": False,             # drop NOISE_CANDIDATES
     "fe_clip_flags": False,          # income==30000 / commute==5.0 censoring indicators
     "fe_log_income": False,          # log(Annual_Income_USD) alongside the raw column
+    # UNSUPERVISED: fixed-coefficient buy_score / worry_score read off the ORIGIN
+    # dataset's recovered generator (cdeotte/fable-5-1-eda-original-data-insights
+    # reproduces the source's random seed exactly and recovers the linear-plus-wobble
+    # rule the source script used). Not fit on this competition's target at all -- the
+    # coefficients are the generator's, not ours -- so this is the cheapest possible test
+    # of "does the true generating formula, not a guessed proxy, help the tree resolve
+    # its additive shapes faster."
+    "fe_recipe_score": False,
+    # UNSUPERVISED frequency encoding (train union test value counts, log1p-scaled) for
+    # an arbitrary column list -- distinct from te_count_feature, which only ever ran
+    # alongside a te_cols entry.
+    "freq_cols": [],
+    # Append the ORIGIN dataset (10,000 rows, itzzomkar/ev-adoption-behavior-and-range-
+    # anxiety) to every fold's TRAINING rows only -- never validated on, never in test.
+    # Untested axis, flagged independently by two public authors as unmeasured.
+    "use_origin_extra": False,
     "te_cols": [],                   # SUPERVISED per-value target encoding (fold-fit)
     "te_smooth": 20.0,               # additive smoothing toward the backoff target
     "te_inner_folds": 5,             # inner K-fold used for the training rows' own TE
@@ -187,6 +220,37 @@ def base_features(train, test, cfg):
             df["log_income"] = np.log(df["Annual_Income_USD"])
         feats_num += ["log_income"]
 
+    if cfg["fe_recipe_score"]:
+        # Coefficients are the ORIGIN generator's own, recovered by reproducing its
+        # random seed exactly (not fit here): buy_score = 1.2*(income/1e5) + 0.6*concern
+        # + 2*subsidy - 1*(anxiety=Medium) - 3*(anxiety=High), thresholded at 5.5 in the
+        # source; worry_score = commute - 5*chargers_home - 5*chargers_work -
+        # 150*home_charging, cut at -25/75 into Range_Anxiety_Level in the source.
+        for df in (tr, te):
+            df["buy_score"] = (
+                1.2 * df["Annual_Income_USD"] / 1e5
+                + 0.6 * df["Environmental_Concern_Level"]
+                + 2.0 * (df["Subsidy_Available"] == "Yes")
+                - 1.0 * (df["Range_Anxiety_Level"] == "Medium")
+                - 3.0 * (df["Range_Anxiety_Level"] == "High"))
+            df["worry_score"] = (
+                df["Daily_Commute_km"]
+                - 5.0 * df["Charging_Stations_Near_Home"]
+                - 5.0 * df["Charging_Stations_Near_Work"]
+                - 150.0 * (df["Home_Charging_Possible"] == "Yes"))
+        feats_num += ["buy_score", "worry_score"]
+
+    if cfg["freq_cols"]:
+        # Unsupervised: a value's count over train union test carries no target
+        # information (README section 3), so this is safe to compute once here rather
+        # than inside the fold loop.
+        for c in cfg["freq_cols"]:
+            name = f"freq_{c}"
+            counts = pd.concat([tr[c], te[c]]).value_counts()
+            tr[name] = np.log1p(tr[c].map(counts).astype(float).values)
+            te[name] = np.log1p(te[c].map(counts).astype(float).values)
+            feats_num.append(name)
+
     if cfg["cat_cols"]:
         # The cheap version of the "tokens" idea the public frontier is using: instead of
         # compressing a value to one number (its target rate, as TE does), hand the value
@@ -270,14 +334,27 @@ def apply_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
         name = f"te_{c}"
         new_cols.append(name)
 
+        # A local de-categorized VIEW for the encoding arithmetic only -- Xtr[c]/Xva[c]/
+        # Xte[c] themselves are left untouched (still native categorical, still handed to
+        # the learner as such). pandas' Categorical.map() maps the .categories and
+        # reconstructs a Categorical result, which then breaks plain float arithmetic
+        # (`Categorical / int`) a few lines down -- str/object side-steps that entirely.
+        cat_src = isinstance(Xtr[c].dtype, pd.CategoricalDtype)
+        ctr = Xtr[c].astype(str) if cat_src else Xtr[c]
+        cva = Xva[c].astype(str) if cat_src else Xva[c]
+        cte = Xte[c].astype(str) if cat_src else Xte[c]
+
         # Quantile bin edges are fit on the TRAINING FOLD ONLY, per the leakage rule.
+        # A neighborhood needs an ORDERING to be a neighbor in -- np.quantile has none
+        # for a categorical column, so a non-numeric column always falls back to the
+        # prior regardless of the global te_backoff setting, rather than erroring.
         btr = bva = bte = None
-        if cfg["te_backoff"] == "neighborhood":
-            edges = np.unique(np.quantile(Xtr[c].values,
+        if cfg["te_backoff"] == "neighborhood" and not cat_src:
+            edges = np.unique(np.quantile(ctr.values,
                                           np.linspace(0, 1, cfg["te_backoff_bins"] + 1)))
-            btr = pd.Series(np.searchsorted(edges, Xtr[c].values), index=Xtr.index)
-            bva = pd.Series(np.searchsorted(edges, Xva[c].values), index=Xva.index)
-            bte = pd.Series(np.searchsorted(edges, Xte[c].values), index=Xte.index)
+            btr = pd.Series(np.searchsorted(edges, ctr.values), index=Xtr.index)
+            bva = pd.Series(np.searchsorted(edges, cva.values), index=Xva.index)
+            bte = pd.Series(np.searchsorted(edges, cte.values), index=Xte.index)
 
         # The inner-fold TE a training row receives is itself noisy: it is built from
         # 4/5 of the fold, and WHICH 4/5 is an arbitrary draw. Averaging over several
@@ -291,27 +368,27 @@ def apply_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
             inner = StratifiedKFold(cfg["te_inner_folds"], shuffle=True,
                                     random_state=rng_seed + 1000 * rep)
             for i, j in inner.split(Xtr, ytr):
-                e, n, br = _fit_encoder(Xtr[c].iloc[i].values, ytr[i],
+                e, n, br = _fit_encoder(ctr.iloc[i].values, ytr[i],
                                         None if btr is None else btr.iloc[i], cfg, prior)
                 fb = (pd.Series(prior, index=Xtr.index[j]) if br is None
                       else btr.iloc[j].map(br).fillna(prior))
-                enc_tr[j] += Xtr[c].iloc[j].map(e).fillna(fb).values / reps
+                enc_tr[j] += ctr.iloc[j].map(e).fillna(fb).astype(np.float64).values / reps
                 if rep == 0:
-                    cnt_tr[j] = Xtr[c].iloc[j].map(n).fillna(0.0).values
+                    cnt_tr[j] = ctr.iloc[j].map(n).fillna(0.0).astype(np.float64).values
         Xtr[name] = enc_tr
 
-        e, n, br = _fit_encoder(Xtr[c].values, ytr, btr, cfg, prior)
-        for X, b in ((Xva, bva), (Xte, bte)):
+        e, n, br = _fit_encoder(ctr.values, ytr, btr, cfg, prior)
+        for X, c_, b in ((Xva, cva, bva), (Xte, cte, bte)):
             fb = prior if br is None else b.map(br).fillna(prior)
-            X[name] = X[c].map(e).fillna(pd.Series(fb, index=X.index) if br is not None
-                                        else prior).values
+            X[name] = c_.map(e).fillna(pd.Series(fb, index=X.index) if br is not None
+                                       else prior).astype(np.float64).values
 
         if cfg["te_count_feature"]:
             cname = f"cnt_{c}"
             new_cols.append(cname)
             Xtr[cname] = np.log1p(cnt_tr)
-            Xva[cname] = np.log1p(Xva[c].map(n).fillna(0.0).values)
-            Xte[cname] = np.log1p(Xte[c].map(n).fillna(0.0).values)
+            Xva[cname] = np.log1p(cva.map(n).fillna(0.0).astype(np.float64).values)
+            Xte[cname] = np.log1p(cte.map(n).fillna(0.0).astype(np.float64).values)
     return new_cols
 
 
@@ -629,6 +706,25 @@ def main():
     feats = feats_num + feats_cat
     print(f"{len(feats)} base features: {feats}")
 
+    origin_X, origin_y = None, None
+    if cfg["use_origin_extra"]:
+        # The 10,000-row ORIGIN dataset the competition's generator was fit to. Its raw
+        # columns share this competition's names and value vocabulary exactly (same
+        # generator lineage), so no supervised transform is needed here -- only an
+        # unsupervised category-dtype alignment so concat cannot silently upcast a
+        # column to object. Missing values (source has ~2% NaN on 3 columns) are left as
+        # NaN: LightGBM learns a split direction for them like any other missing value,
+        # and a TE groupby simply drops a NaN row from that one column's stats.
+        origin_raw = pd.read_csv(_origin_data_path())
+        origin_X = pd.DataFrame({c: origin_raw[c].values for c in feats if c in origin_raw.columns})
+        for c in feats_cat:
+            if c in origin_X.columns:
+                origin_X[c] = pd.Categorical(origin_X[c], categories=train[c].cat.categories)
+        origin_X = origin_X[feats]
+        origin_y = (origin_raw[TARGET] == "Yes").astype(int).values
+        print(f"origin extra rows: {len(origin_X)} from {_origin_data_path().name}, "
+              f"never validated on, appended to every fold's training rows only")
+
     skf = StratifiedKFold(cfg["n_folds"], shuffle=True, random_state=cfg["cv_seed"])
     oof = np.zeros(len(train))
     fold_id = np.full(len(train), -1, dtype=np.int8)
@@ -638,6 +734,14 @@ def main():
     for f, (i, j) in enumerate(skf.split(train[feats], y)):
         Xtr, Xva, Xte = train[feats].iloc[i].copy(), train[feats].iloc[j].copy(), test[feats].copy()
         ytr, yva = y[i], y[j]
+
+        if origin_X is not None:
+            # Training rows only: origin rows are never in i/j, so they can never land
+            # in Xva/oof, and they are never in Xte. Reset the index so the TE
+            # functions' internal Xtr.index bookkeeping (positional, rebuilt fresh each
+            # fold) stays consistent -- nothing downstream keys on train's original ids.
+            Xtr = pd.concat([Xtr.reset_index(drop=True), origin_X], ignore_index=True)
+            ytr = np.concatenate([ytr, origin_y])
 
         # Supervised transforms live INSIDE the fold loop. This is the load-bearing line.
         if cfg["te_cols"]:

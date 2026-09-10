@@ -880,3 +880,132 @@ the closed ensemble axis.
 
 No champion moved. `experiments/runs.csv` rows `718b2ed3`, `04d11559`, `83b7b495` now carry their
 `public_lb_score`.
+
+### Phase 12 — five leads from the public frontier, tested offline, zero clear the gate (2026-09-09)
+
+The public leaderboard was re-read (top now 0.94672, a dense cluster at 0.9464–0.9465, up from
+Phase 8's 0.94647) and four notebooks pulled in full: `cdeotte/fable-5-1-eda-original-data-insights`,
+`georgymamarin/s6e9-starter-how-to-tell-a-real-gain-from-noise`,
+`dariushafshar/s6e9-0-exact-twins-31-discrete-zero-shift`, and its companion
+`s6e9-0-94585-1-of-4-ingredients-carries-it`. Read for ideas only, per the artifact-sharing policy
+(§5) — no code or blend adopted. One genuine structural finding came out of it: Chris Deotte
+recovered the ORIGIN dataset's exact NumPy seed (101) and reproduced all 10,000 rows bit-for-bit,
+reading off the literal generator rule (`buy_score = 1.2*(income/1e5) + 0.6*concern + 2*subsidy -
+1*(anxiety=Medium) - 3*(anxiety=High)`, threshold 5.5) — and Georgy Mamarin's companion piece
+establishes that ORIGIN itself is synthetic (a "custom Python script", per its own dataset
+description) and that Kaggle's own generator is a *second, different machine* fitted to those 10,000
+rows, which is the most plausible mechanism yet for why the competition's income column carries
+per-value lookup structure the literal linear recipe does not predict.
+
+Five strict twins of E1 (0.945642), all local, all offline, zero submission slots spent:
+
+| probe | change | OOF | Δ vs E1 | best_iter | verdict |
+|---|---|---|---|---|---|
+| P1 | TE the 6 native categoricals too (not just the 3 numerics) | 0.945634 | −0.000008 | 966–1347 | null |
+| P2 | `max_bin` 255 → 1023 | 0.945644 | +0.000002 | 772–1619 | dead null |
+| P3 | + Deotte's exact `buy_score`/`worry_score` as two engineered columns | 0.945498 | **−0.000144** | 369–444 | negative |
+| P4 | unsupervised frequency encoding, all 13 raw columns | 0.945694 | +0.000052 | 953–1158 | positive, sub-gate |
+| P5 | 10,000 ORIGIN rows appended to every fold's TRAIN partition only | 0.945413 | **−0.000229** | 560–1474 | negative |
+
+**P1/P2 close the two concrete external levers this round offered, definitively, against our own
+recipe rather than a weaker one.** dariushafshar reports TE-everything as their single largest gain
+(+0.0011) and georgymamarin reports the bin cap as theirs — both on baselines without per-value TE.
+On E1 both are null: P1 matches Mamarin's own control on his own baseline ("declaring a low-
+cardinality column categorical... bought nothing, both encodings land in the same place") — LightGBM's
+native categorical split already sorts levels by gradient/hessian, and with thousands of rows per
+level on 2–4-level columns there is no sparse-value shrinkage problem for TE to solve, unlike income's
+13,214 values at ~50 rows/value. P2 directly confirms Phase 1c's "the lookup is fully extracted"
+finding by measurement rather than inference: once TE already hands the tree exact per-value
+resolution on a separate column, raising the raw column's own bin cap has nothing left to add.
+
+**P3 is F1/H2/H3's displacement signature a fourth time, and the sharpest version of it yet.**
+`best_iter` collapses to 369–444 from E1's 777–1098 — the tree leans on the two composite columns and
+early-stops before building the fine per-feature shapes E1 spends ~1000 rounds on, exactly the
+mechanism that broke F1 (native categorical income, −0.000999), H2 (5 paired keys, −0.000521) and H3
+(1 paired key, −0.000405). The difference this time is the input: not a guessed proxy but the
+generator's own recovered coefficients, fit on zero competition data. That the true formula still
+displaces resolution is the strongest evidence yet that E1's per-feature shapes already resolve finer
+than any fixed-coefficient linear combination of the same columns can — Georgy Mamarin independently
+ran the identical test on his own baseline and got the same null ("worth nothing"), a second dataset,
+second implementation, same result.
+
+**P4 is a genuine maybe, not a clean null, and is the one candidate worth a second seed rather than a
+slot.** +0.000052 is 1.4x the 0.000038 seed-noise floor but well under half the +0.0000949 gate —
+too small to trust on one draw, too large to file as pure noise without checking. `best_iter` shows no
+collapse (953–1158, in E1's own range), so if it is real the mechanism is additive rather than
+displacing: unlike P1's high-count categoricals, `freq_cols` also covers `Charging_Stations_Near_Home`
+/`_Work` and `Number_of_Cars_Owned`, whose real non-monotonic structure (Phase 6) is cheap for a tree
+to split on natively but whose *rarity* a frequency column exposes directly. Re-run at `model_seed`
+1337 before deciding either way; do not ship on this one draw regardless of sign.
+
+One slot spent to check it anyway (playbook S1's burn-the-slots rule: this was a cheap paired point,
+not a champion bet): **P4 → LB 0.94588**, against a GBDT-family-fit prediction of 0.94598 (slope
+1.0832, intercept −0.0784) — residual **−0.00010, 1.1σ of the instrument's own 0.000092**, unremarkable
+and inside the GBDT band. Against E1's own 0.94586 that is **+0.00002**, indistinguishable at the
+near-twin paired resolution (0.000027). The LB agrees with the second-seed-before-deciding read: on
+this one point there is nothing here yet, consistent with the OOF delta being sub-gate rather than a
+false negative the LB would have caught.
+
+**P5 closes the "should we augment with ORIGIN" question, and closes it hard.** −0.000229 is ~6x the
+seed-noise floor, the largest-magnitude result of the round. Mechanism, per Mamarin's §16: ORIGIN and
+the competition data are drawn from two *different* generators (the literal script vs. Kaggle's own
+fitted model), so 10,000 rows from the wrong conditional distribution P(y|x) measurably pull the
+fit away from the population E1 is actually scored against — a genuine distribution-mismatch cost,
+not overfitting noise. This was flagged as explicitly untested by the community ("someone should put
+a number on it") and now has one: naive unweighted concatenation into the training fold is a net
+negative for this competition. Downweighting ORIGIN rows or excluding them entirely from the TE fit
+(raw features only) might change the sign, but that is a new probe, not a re-read of this one.
+
+**Verdict: no champion moved, and every axis this round tested closes.** Combined with Phases 0–11,
+the encoder, capacity, interaction, ensembling, in-fold variance, shrinkage, architecture (nine
+families), and now categorical encoding, bin resolution, the literal generator formula, blanket
+frequency encoding, and ORIGIN augmentation are all measured closed. The ≈0.0002 gap to the ~0.9465
+frontier stands as it did after Phase 5: consistent with noise at this instrument's resolution, not an
+unfound lever. `experiments/runs.csv` rows `fb2aefef`, `18cf4e13`, `c6addbeb`, `13692fb1`, `3e9e7b34`.
+
+### Phase 13 — three meta-models over existing artifacts, zero incremental training (2026-09-09)
+
+Playbook §1's "burn the slots" rule applied to the ensemble axis rather than to a new leg: every
+architecture family accumulated since Phase 8–12 (`O1` CatBoost 0.945150, `M1`/`O2` EBM
+0.945550/0.945015, `N1` plain-MLP 0.944912, `P4` freq-encoded LightGBM 0.945694) already has complete
+OOF+test artifacts, so combining them costs a `stack_logit.py` call, not a training run. `leg_probe.py`
+first checked each individually against the curated 6-leg pool (`E1/E4/E4d/F2/E2/D2`, floor 0.945402) —
+**all five miss gate 2 solo**, contribution +0.000001 to +0.000039 against the +0.0002 bar, `P4` best
+of the five. Three combinations followed:
+
+| probe | pool | mode | OOF | Δ vs champion | LB | mechanism |
+|---|---|---|---|---|---|---|
+| **A** | all 11 legs (curated 6 + 5 new) | fitted logit stack | 0.945774 | +0.000031 | **0.94590** | highest OOF on record; fitted combiner down-weights the weaker new legs instead of diluting into them |
+| **D** | 6 legs: curated pool with `D2`+`E4d` (its two weakest) swapped for `P4`+`M1` | fitted logit stack | 0.945768 | +0.000025 | **0.94590** | the literal ADD/SWAP-at-constant-pool-size test this file's conventions call for; best single swap found |
+| **B** | same 11 legs as A | fixed rank-mean blend | 0.945730 | −0.000013 | 0.94584 | fixed combiner, no down-weighting available |
+
+**None clears the +0.0002 gate — this is not a champion change.** A and D both miss on OOF (+0.000031,
++0.000025) but both land LB 0.94590, +0.00002 over the prior best 0.94588 — a delta far under the
+GBDT-family residual σ (0.000092, README §4), i.e. noise-indistinguishable from the shipped champion.
+`pool.json` and the champion designation are unchanged.
+
+**B reverses Phase 11's "fixed beats fitted" finding, and the reversal replicates on the LB.** At 6
+near-twin legs (corr 0.9922–0.9995) a fitted combiner had nothing to subtract and the fixed blend won
+(champion 0.945743 vs `logit_stack` 0.945719). Add five weaker, architecturally different legs (cat,
+2×EBM, plain-MLP, all soloing under the 6-leg pool floor) and the ordering flips: fixed blend B
+(0.945730) loses −0.000044 OOF to fitted stack A (0.945774), because averaging dilutes toward the weak
+members while a fitted combiner shrinks their weight instead (A's weight table: the three weakest legs
+get 0.14–0.40 vs the strongest LightGBM's 1.27). The gap survives on the leaderboard too — B is 0.94584
+against A/D's 0.94590, same ordering, −0.00006. Confirms `stack_logit.py`'s own note in the least
+ambiguous way available: which combiner wins is a property of the **pool's composition**, not a fixed
+rule — re-test at every pool-size change rather than reusing Phase 11's verdict.
+
+**A separately-suggestive, unconfirmed point: mixing in non-tree architectures may cost a small,
+consistent LB offset.** All three probes here land 0.00016–0.00018 *below* the GBDT-family regression's
+predicted LB (slope 1.0832, intercept −0.0784) — roughly 1.8σ of its own 0.000092 residual, and in the
+same direction for all three combiners regardless of fitted-vs-fixed. The existing 6-leg `logit_stack`
+(pure LightGBM/XGBoost) sat inside the band at −0.00007. One consistent-direction observation across
+three paired points is a lead, not a finding — filed here rather than acted on; would need dedicated
+GBDT-only vs. mixed-architecture paired stacks to separate "mixing architectures" from "this specific
+pool" as the cause.
+
+No slots wasted on redundant confirmation: a fourth combination (E1 + all four non-LightGBM/XGBoost
+legs, OOF 0.945701, run `d7beea36`) scored below every alternative above and was logged but not
+submitted — it only re-confirms `leg_diversity.py`'s standing conclusion that decorrelation pays
+nothing without solo strength to decorrelate. `experiments/runs.csv` rows `631bbe8f`, `a536d5e7`,
+`2aa6afb9`, `d7beea36`.
