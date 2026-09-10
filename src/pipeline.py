@@ -117,8 +117,43 @@ DEFAULTS = {
     # anxiety) to every fold's TRAINING rows only -- never validated on, never in test.
     # Untested axis, flagged independently by two public authors as unmeasured.
     "use_origin_extra": False,
+    # UNSUPERVISED digit decomposition: floor(v / 10^p) % 10 for each power in
+    # fe_digit_powers, for every column named in fe_digit_cols. Read from the public
+    # frontier recipe (jazivxt/single-model-zoom-zoom, forked as najiama/pure-lgbm-model,
+    # 55 votes) -- its OOF scored 0.946064 on our own frozen split, +0.000422 over E1
+    # (README Phase 14). Safe to compute once over train union test: no target involved.
+    "fe_digit_cols": [],
+    "fe_digit_powers": [-4, -3, -2, -1, 0, 1, 2, 3],
+    # UNSUPERVISED frequency encoding of the digit keys built by fe_digit_cols (distinct
+    # from freq_cols, which encodes the raw column values themselves).
+    "freq_digit_cols": [],
+    # SUPERVISED multi-scale neighbour-pooled shape encoder for a numeric column, keyed
+    # on EQUAL-WIDTH bins (not quantile bins like te_bin_cols) at each width in
+    # te_shape_bins. Per width, emits: bin position, smoothed central rate, a
+    # gaussian-neighbour-smoothed rate, left-neighbour rate, right-neighbour rate,
+    # slope (right - left), curvature (central - avg(left,right)), log1p(count).
+    # MECHANISM: our existing te_cols keys on the exact value at ~50 rows/value, so the
+    # rate estimate's own SE (~0.053) is close to the real per-value SD (0.0748, README
+    # section 6) -- signal-to-noise near 1.4:1. Pooling adjacent bins cuts that SE
+    # substantially while the slope/curvature channels hand the tree the response's
+    # local DERIVATIVE, which Phase 3b named as the mechanism capacity actually buys.
+    # This is a materially finer regime than te_bin_cols/H1 (100 quantile bins, smooth
+    # 500 -- ~132 distinct income values per bin): shape bins here are ~10-19 dollars
+    # wide. Fit on the TRAINING FOLD ONLY, inner-K-fold protected like apply_target_encoding.
+    "te_shape_cols": [],
+    "te_shape_bins": [8192, 16384],
+    "te_shape_smooth": 10.0,
     "te_cols": [],                   # SUPERVISED per-value target encoding (fold-fit)
     "te_smooth": 20.0,               # additive smoothing toward the backoff target
+    # When non-empty, emit ONE TE COLUMN PER SMOOTHING VALUE instead of a single te_smooth
+    # column, e.g. [10, "auto"] mirrors the public frontier recipe's sklearn TargetEncoder
+    # smooth=10 and smooth="auto" side by side. "auto" is an empirical-Bayes smoothing in
+    # the same spirit as sklearn's rule (target variance / mean within-category variance,
+    # see _fit_encoder) -- not a bit-exact port, since the goal is testing whether a
+    # SECOND, differently-smoothed view of the same key helps, not matching sklearn's
+    # encoder exactly. te_smooth itself is ignored for cols in te_cols when this is
+    # non-empty.
+    "te_multi_smooth": [],
     "te_inner_folds": 5,             # inner K-fold used for the training rows' own TE
     "te_inner_repeats": 1,           # average the inner-fold TE over this many splits
     "te_backoff": "prior",           # "prior" | "neighborhood" -- what a rare value falls back to
@@ -251,6 +286,39 @@ def base_features(train, test, cfg):
             te[name] = np.log1p(te[c].map(counts).astype(float).values)
             feats_num.append(name)
 
+    def _digit(df, c, p):
+        v = df[c].to_numpy(np.float64)
+        return np.floor_divide(v, 10.0 ** p) % 10
+
+    if cfg["fe_digit_cols"]:
+        # UNSUPERVISED: floor(v / 10**p) % 10 at each configured power. Ported from the
+        # public frontier recipe (jazivxt/single-model-zoom-zoom -- README Phase 14).
+        # NUMERIC columns only -- a categorical column's "digits" would just be its
+        # already-compact level index, so fe_digit_cols is meant to be a subset of
+        # RAW_NUM. Safe to compute once over train union test: no target read.
+        for c in cfg["fe_digit_cols"]:
+            for p in cfg["fe_digit_powers"]:
+                name = f"digit_{c}_{p}"
+                tr[name] = _digit(tr, c, p)
+                te[name] = _digit(te, c, p)
+                feats_num.append(name)
+
+    if cfg["freq_digit_cols"]:
+        # UNSUPERVISED frequency encoding of the digit keys above (train union test
+        # counts, log1p-scaled) -- distinct from freq_cols, which encodes the raw
+        # column values themselves, not their per-power digits.
+        for c in cfg["freq_digit_cols"]:
+            for p in cfg["fe_digit_powers"]:
+                dname = f"digit_{c}_{p}"
+                if dname not in tr.columns:
+                    tr[dname] = _digit(tr, c, p)
+                    te[dname] = _digit(te, c, p)
+                name = f"freqdig_{c}_{p}"
+                counts = pd.concat([tr[dname], te[dname]]).value_counts()
+                tr[name] = np.log1p(tr[dname].map(counts).astype(float).values)
+                te[name] = np.log1p(te[dname].map(counts).astype(float).values)
+                feats_num.append(name)
+
     if cfg["cat_cols"]:
         # The cheap version of the "tokens" idea the public frontier is using: instead of
         # compressing a value to one number (its target rate, as TE does), hand the value
@@ -311,7 +379,21 @@ def _fit_encoder(values, y, bins, cfg, prior, smooth=None):
         target = vbin.reindex(st.index).map(bin_rate).fillna(prior)
     else:
         bin_rate, target = None, pd.Series(prior, index=st.index)
-    sm = cfg["te_smooth"] if smooth is None else float(smooth)
+    if smooth == "auto":
+        # Empirical-Bayes smoothing in the spirit of sklearn's TargetEncoder(smooth=
+        # "auto") -- see te_multi_smooth in DEFAULTS: not a bit-exact port, but the same
+        # idea of letting the data set the smoothing rather than a fixed constant. A
+        # single scalar tau = target variance / mean within-value variance, applied to
+        # every value in this column (sklearn's own "auto" is also one global tau, not
+        # per-category).
+        y_var = float(np.var(y)) if len(y) > 1 else 0.0
+        cnt = st["count"].clip(lower=1)
+        rate = st["sum"] / cnt
+        within = rate * (1 - rate)
+        mean_within = float((within * st["count"]).sum() / max(st["count"].sum(), 1))
+        sm = y_var / mean_within if mean_within > 1e-9 else cfg["te_smooth"]
+    else:
+        sm = cfg["te_smooth"] if smooth is None else float(smooth)
     enc = (st["sum"] + target * sm) / (st["count"] + sm)
     return enc, st["count"], bin_rate
 
@@ -327,13 +409,17 @@ def apply_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
     MONOTONE function of income, per-value residual rates still have SD 0.0748 against a
     binomial expectation of 0.0284. The column is a value->target lookup table, and a
     lookup is invisible to any model that reads the value as a magnitude.
+
+    cfg["te_multi_smooth"], when non-empty, emits one te_{c}_s{smooth} column PER
+    smoothing value instead of a single te_{c} column at cfg["te_smooth"] -- the public
+    frontier recipe's "smooth=10 and smooth='auto' side by side" idea (README Phase 14).
+    Empty (the default) reproduces the original single-column behaviour exactly, so every
+    archived run stays bit-identical.
     """
     prior = float(ytr.mean())
     new_cols = []
+    smooths = list(cfg["te_multi_smooth"]) if cfg["te_multi_smooth"] else [None]
     for c in cols:
-        name = f"te_{c}"
-        new_cols.append(name)
-
         # A local de-categorized VIEW for the encoding arithmetic only -- Xtr[c]/Xva[c]/
         # Xte[c] themselves are left untouched (still native categorical, still handed to
         # the learner as such). pandas' Categorical.map() maps the .categories and
@@ -356,39 +442,50 @@ def apply_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
             bva = pd.Series(np.searchsorted(edges, cva.values), index=Xva.index)
             bte = pd.Series(np.searchsorted(edges, cte.values), index=Xte.index)
 
-        # The inner-fold TE a training row receives is itself noisy: it is built from
-        # 4/5 of the fold, and WHICH 4/5 is an arbitrary draw. Averaging over several
-        # independent inner splits cancels that draw without touching the leakage
-        # property -- every split still excludes the row's own label from its encoding.
-        # Pure variance reduction, which is what an additive generator rewards.
-        enc_tr = np.zeros(len(Xtr), dtype=np.float64)
-        cnt_tr = np.zeros(len(Xtr), dtype=np.float64)
         reps = max(1, int(cfg["te_inner_repeats"]))
-        for rep in range(reps):
-            inner = StratifiedKFold(cfg["te_inner_folds"], shuffle=True,
-                                    random_state=rng_seed + 1000 * rep)
-            for i, j in inner.split(Xtr, ytr):
-                e, n, br = _fit_encoder(ctr.iloc[i].values, ytr[i],
-                                        None if btr is None else btr.iloc[i], cfg, prior)
-                fb = (pd.Series(prior, index=Xtr.index[j]) if br is None
-                      else btr.iloc[j].map(br).fillna(prior))
-                enc_tr[j] += ctr.iloc[j].map(e).fillna(fb).astype(np.float64).values / reps
-                if rep == 0:
-                    cnt_tr[j] = ctr.iloc[j].map(n).fillna(0.0).astype(np.float64).values
-        Xtr[name] = enc_tr
+        last_n, last_cnt_tr = None, None
+        for sm in smooths:
+            name = f"te_{c}" if sm is None else f"te_{c}_s{sm}"
+            new_cols.append(name)
 
-        e, n, br = _fit_encoder(ctr.values, ytr, btr, cfg, prior)
-        for X, c_, b in ((Xva, cva, bva), (Xte, cte, bte)):
-            fb = prior if br is None else b.map(br).fillna(prior)
-            X[name] = c_.map(e).fillna(pd.Series(fb, index=X.index) if br is not None
-                                       else prior).astype(np.float64).values
+            # The inner-fold TE a training row receives is itself noisy: it is built
+            # from 4/5 of the fold, and WHICH 4/5 is an arbitrary draw. Averaging over
+            # several independent inner splits cancels that draw without touching the
+            # leakage property -- every split still excludes the row's own label from
+            # its encoding. Pure variance reduction, which is what an additive
+            # generator rewards.
+            enc_tr = np.zeros(len(Xtr), dtype=np.float64)
+            cnt_tr = np.zeros(len(Xtr), dtype=np.float64)
+            for rep in range(reps):
+                inner = StratifiedKFold(cfg["te_inner_folds"], shuffle=True,
+                                        random_state=rng_seed + 1000 * rep)
+                for i, j in inner.split(Xtr, ytr):
+                    e, n, br = _fit_encoder(ctr.iloc[i].values, ytr[i],
+                                            None if btr is None else btr.iloc[i], cfg,
+                                            prior, sm)
+                    fb = (pd.Series(prior, index=Xtr.index[j]) if br is None
+                          else btr.iloc[j].map(br).fillna(prior))
+                    enc_tr[j] += ctr.iloc[j].map(e).fillna(fb).astype(np.float64).values / reps
+                    if rep == 0:
+                        cnt_tr[j] = ctr.iloc[j].map(n).fillna(0.0).astype(np.float64).values
+            Xtr[name] = enc_tr
+            last_cnt_tr = cnt_tr
+
+            e, n, br = _fit_encoder(ctr.values, ytr, btr, cfg, prior, sm)
+            last_n = n
+            for X, c_, b in ((Xva, cva, bva), (Xte, cte, bte)):
+                fb = prior if br is None else b.map(br).fillna(prior)
+                X[name] = c_.map(e).fillna(pd.Series(fb, index=X.index) if br is not None
+                                           else prior).astype(np.float64).values
 
         if cfg["te_count_feature"]:
+            # Counts don't depend on smoothing, so any smoothing pass's (n, cnt_tr)
+            # gives the same values -- last_n/last_cnt_tr are just whichever ran last.
             cname = f"cnt_{c}"
             new_cols.append(cname)
-            Xtr[cname] = np.log1p(cnt_tr)
-            Xva[cname] = np.log1p(cva.map(n).fillna(0.0).astype(np.float64).values)
-            Xte[cname] = np.log1p(cte.map(n).fillna(0.0).astype(np.float64).values)
+            Xtr[cname] = np.log1p(last_cnt_tr)
+            Xva[cname] = np.log1p(cva.map(last_n).fillna(0.0).astype(np.float64).values)
+            Xte[cname] = np.log1p(cte.map(last_n).fillna(0.0).astype(np.float64).values)
     return new_cols
 
 
@@ -455,6 +552,99 @@ def apply_key_target_encoding(Xtr, ytr, Xva, Xte, keys, smooth, nbins, cfg, rng_
         e, _, _ = _fit_encoder(ktr.values, ytr, None, kcfg, prior, smooth)
         Xva[name] = pd.Series(codes["va"], index=Xva.index).map(e).fillna(prior).values
         Xte[name] = pd.Series(codes["te"], index=Xte.index).map(e).fillna(prior).values
+    return new_cols
+
+
+def _shape_bin_stats(codes, y, n_bins, prior, smooth):
+    """Per-bin (sum, count) plus derived CENTRAL / NEIGHBOUR-POOLED rate channels.
+
+    Ported from the public frontier recipe's `bin_statistics`
+    (jazivxt/single-model-zoom-zoom, forked as najiama/pure-lgbm-model -- README Phase
+    14): central = additive-smoothed rate of the bin itself; symmetric = a 3-bin
+    gaussian-weighted neighbourhood rate (kernel sigma=0.8 bins); left/right = the
+    ADJACENT bin's smoothed rate; slope = right - left; curvature = how far the bin's
+    own rate sits from the average of its neighbours. All smoothed toward `prior` by
+    `smooth`, same additive-smoothing arithmetic as _fit_encoder.
+
+    Returns an (n_bins, 7) array: [central, symmetric, left, right, slope, curvature,
+    log1p(count)].
+    """
+    sums = np.bincount(codes, weights=y, minlength=n_bins).astype(np.float64)
+    counts = np.bincount(codes, minlength=n_bins).astype(np.float64)
+    central = (sums + smooth * prior) / (counts + smooth)
+    left_sums, left_counts = np.r_[0.0, sums[:-1]], np.r_[0.0, counts[:-1]]
+    right_sums, right_counts = np.r_[sums[1:], 0.0], np.r_[counts[1:], 0.0]
+    left = (left_sums + smooth * prior) / (left_counts + smooth)
+    right = (right_sums + smooth * prior) / (right_counts + smooth)
+    kernel = np.exp(-0.5 * (np.arange(-1, 2) / 0.8) ** 2)
+    neighbor_sums = np.convolve(sums, kernel, mode="same")
+    neighbor_counts = np.convolve(counts, kernel, mode="same")
+    symmetric = ((neighbor_sums + smooth * kernel.sum() * prior) /
+                (neighbor_counts + smooth * kernel.sum()))
+    slope = right - left
+    curvature = central - 0.5 * (left + right)
+    return np.column_stack([central, symmetric, left, right, slope, curvature,
+                            np.log1p(counts)])
+
+
+def apply_shape_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
+    """SUPERVISED multi-scale neighbour-pooled shape encoder for a NUMERIC column, fit
+    on the TRAINING FOLD ONLY, one EQUAL-WIDTH bin grid per width in
+    cfg["te_shape_bins"] (distinct from te_bin_cols, which uses QUANTILE bins).
+
+    MECHANISM (README Phase 14, DEFAULTS): apply_target_encoding keys on the exact
+    value at ~50 rows/value for Annual_Income_USD, so the per-value rate estimate's own
+    SE (~0.053) is close to the real per-value SD (0.0748, README section 6) --
+    signal-to-noise near 1.4:1. Pooling adjacent bins here cuts that SE substantially
+    while the slope/curvature channels hand the tree the response's local DERIVATIVE.
+    This is a materially finer regime than te_bin_cols/H1 (100 QUANTILE bins, smoothing
+    500, ~132 distinct income values per bin): at te_shape_bins=[8192, 16384] over
+    income's ~$158k range, each bin is roughly $10-19 wide.
+
+    Leakage protocol mirrors apply_target_encoding: bin edges are fit on Xtr only;
+    training rows get their channels from an inner K-fold so no row informs its own
+    bin's statistic (the label of a $50,003 row can otherwise leak into that bin's rate
+    via a wide, coarse bin, exactly like the per-value case); val/test use the full
+    training-fold statistics.
+    """
+    prior = float(ytr.mean())
+    smooth = cfg["te_shape_smooth"]
+    channel_names = ["pos", "central", "symmetric", "left", "right", "slope",
+                     "curvature", "logcount"]
+    new_cols = []
+    for c in cols:
+        v_tr = Xtr[c].to_numpy(np.float64)
+        v_va = Xva[c].to_numpy(np.float64)
+        v_te = Xte[c].to_numpy(np.float64)
+        lo, hi = v_tr.min(), v_tr.max()
+        for width in cfg["te_shape_bins"]:
+            edges = np.linspace(lo, hi, width + 1)
+
+            def code(v, edges=edges, width=width):
+                return np.clip(np.searchsorted(edges[1:-1], v), 0, width - 1)
+
+            codes_tr, codes_va, codes_te = code(v_tr), code(v_va), code(v_te)
+            prefix = f"teshape_{c}_{width}_"
+
+            feat_tr = np.zeros((len(v_tr), len(channel_names)), dtype=np.float64)
+            inner = StratifiedKFold(cfg["te_inner_folds"], shuffle=True,
+                                    random_state=rng_seed)
+            for i, j in inner.split(codes_tr, ytr):
+                stats = _shape_bin_stats(codes_tr[i], ytr[i], width,
+                                         float(ytr[i].mean()), smooth)
+                feat_tr[j, 0] = codes_tr[j] / max(width - 1, 1)
+                feat_tr[j, 1:] = stats[codes_tr[j]]
+            for k, cn in enumerate(channel_names):
+                Xtr[prefix + cn] = feat_tr[:, k]
+
+            stats = _shape_bin_stats(codes_tr, ytr, width, prior, smooth)
+            for X, codes in ((Xva, codes_va), (Xte, codes_te)):
+                X[prefix + "pos"] = codes / max(width - 1, 1)
+                block = stats[codes]
+                for k, cn in enumerate(channel_names[1:]):
+                    X[prefix + cn] = block[:, k]
+
+            new_cols += [prefix + cn for cn in channel_names]
     return new_cols
 
 
@@ -755,6 +945,9 @@ def main():
             apply_key_target_encoding(Xtr, ytr, Xva, Xte, cfg["te_pair_cols"],
                                       cfg["te_pair_smooth"], cfg["te_pair_bins"], cfg,
                                       cfg["cv_seed"] + f, "tep_")
+        if cfg["te_shape_cols"]:
+            apply_shape_target_encoding(Xtr, ytr, Xva, Xte, cfg["te_shape_cols"], cfg,
+                                        cfg["cv_seed"] + f)
 
         n_model_features = Xtr.shape[1]
         # Seed-bagging INSIDE a fold averages several models trained on the same rows,

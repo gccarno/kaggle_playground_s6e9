@@ -575,6 +575,12 @@ near the ceiling this feature set and model family can reach; the ≈0.0002 gap 
 Any further gain would need a genuinely new representation (the embedding axis, Phase 2b–4, is
 measured and real but below the pool floor) or a structural fact about the generator not yet found.
 
+**Corrected in Phase 14: this verdict was wrong.** The "genuinely new representation" this paragraph
+called for turned out to exist and be reachable — a multi-scale neighbour-pooled income encoder,
+worth +0.000347 OOF once found. The gap was real signal on an axis (encoder granularity) this phase
+had not yet tried, not noise at this instrument's resolution. See Phase 14 for the mechanism and the
+measurement that overturned it.
+
 ### Phase 6 — SHAP catches what the linear screen missed: the "noise" columns aren't (2026-09-05)
 
 Every prior read of feature importance was aggregate and structure-blind: single-feature raw-value
@@ -963,6 +969,12 @@ frequency encoding, and ORIGIN augmentation are all measured closed. The ≈0.00
 frontier stands as it did after Phase 5: consistent with noise at this instrument's resolution, not an
 unfound lever. `experiments/runs.csv` rows `fb2aefef`, `18cf4e13`, `c6addbeb`, `13692fb1`, `3e9e7b34`.
 
+**Corrected in Phase 14: this verdict was also wrong, on the same axis Phase 5's was.** "Encoder" here
+meant raw-value TE, binned TE, categorical TE and bin resolution — it never tried a neighbour-pooled,
+multi-scale encoding, which is precisely what this round's own read of the public frontier's two
+concrete ideas (P1/P2) screened out without noticing the recipe's THIRD, untested ingredient (its
+income shape encoder) sitting one layer beneath the ones that were checked. See Phase 14.
+
 ### Phase 13 — three meta-models over existing artifacts, zero incremental training (2026-09-09)
 
 Playbook §1's "burn the slots" rule applied to the ensemble axis rather than to a new leg: every
@@ -1009,3 +1021,112 @@ legs, OOF 0.945701, run `d7beea36`) scored below every alternative above and was
 submitted — it only re-confirms `leg_diversity.py`'s standing conclusion that decorrelation pays
 nothing without solo strength to decorrelate. `experiments/runs.csv` rows `631bbe8f`, `a536d5e7`,
 `2aa6afb9`, `d7beea36`.
+
+### Phase 14 — the frontier recipe was a representation gap, not noise; new champion (2026-09-10)
+
+**Phase 5 and Phase 12's "the ≈0.0002 gap to the frontier is consistent with noise, not an unfound
+lever" is corrected here, the way Phase 1 corrected Phase 0 and Phase 3b corrected B7/D4.** It was
+wrong, and direct measurement is what found the error: the leaderboard had grown from 533 teams
+(Phase 8) to **1451**, the public top from 0.94647 to 0.94672, and the exact-score cluster the
+competition was already known to have (Phase 8's "13 teams at 0.94607") turned out to trace to an
+identifiable **model recipe**, not a blend artifact — `jazivxt/single-model-zoom-zoom`, forked as
+`najiama/pure-lgbm-model-cv-0-94606-lb-0-94637` (55 votes) and re-forked across the whole
+0.9463–0.94644 band. Its published OOF file was downloaded as a **diagnostic** (permitted by §5:
+"may be read for ideas and attached as diagnostics") and scored against our own labels on our own
+frozen split: **OOF 0.946064**, +0.000422 over E1 (4.4× the gate), at logit-correlation **0.993**
+to our own legs (a near-twin, not a decorrelated model) — meaning the gap was a better
+**representation**, not headroom the ensemble axis could reach. No artifact from their submission
+or code entered anything shipped; every ingredient below was reimplemented from scratch under this
+repo's own leakage protocol, per the ours-only policy (§5).
+
+**The recipe's five ingredients, read from source, and the mechanism identified as most likely
+before any run:** digit decomposition (`floor(v/10^p) % 10`), a multi-scale neighbour-pooled income
+encoder (equal-width bins at two widths, each emitting position/central/gaussian-smoothed/
+left/right/slope/curvature/log-count channels), dual TE smoothing (`smooth=10` and an
+empirical-Bayes `"auto"` side by side), blanket frequency encoding, and their own hyperparameters
+(`lr 0.02, num_leaves 31, max_depth 5, colsample 0.303, reg_alpha 0.07, reg_lambda 2.03,
+max_bin 1024`). The prime suspect: our own per-value TE keys `Annual_Income_USD` at ~50 rows/value,
+so the rate estimate's own SE (~0.053) sits close to the real per-value SD (0.0748, §6) —
+signal-to-noise near 1.4:1. Pooling adjacent bins cuts that SE while explicit slope/curvature
+channels hand the tree the response's local derivative — a materially finer regime than H1's own
+quantile-bin test (100 bins, smoothing 500, ~132 income values/bin).
+
+**A read-only check first, to keep from double-counting a source of signal already priced in.**
+Income's ones-digit alone looked dramatic (rate SD 0.021 at 13.8× its own SE), but restricted to
+unclipped rows (excluding the 9.21%-of-rows floor at 30000, rate 0.0443 vs 0.1879 elsewhere — which
+E1's per-value TE already captures exactly) the ratio falls to 4.9×: real, but modest. This
+correctly predicted the digit block's small role below.
+
+`src/pipeline.py` gained five new config axes, every one defaulting off/empty so every archived run
+stays bit-identical: `fe_digit_cols`/`fe_digit_powers`/`freq_digit_cols` (unsupervised digit
+features), `te_shape_cols`/`te_shape_bins`/`te_shape_smooth` (`apply_shape_target_encoding`, the
+neighbour-pooled encoder — same fold-only-fit, inner-K-fold-protected protocol as
+`apply_target_encoding`), and `te_multi_smooth` (one TE column per smoothing value, including an
+`"auto"` empirical-Bayes rule in the spirit of, not a bit-exact port of, sklearn's). Scope decisions
+made during implementation, logged for auditability: `fe_digit_cols` covers the 7 native numeric
+columns only, not the 6 categoricals their notebook first integer-codes (digit-decomposing an
+already-compact 0–3 code is near-degenerate); `te_multi_smooth` applies only to E1's existing 3
+`te_cols`, not to all 61 raw-plus-digit keys their notebook TEs (a direct test of "does a second
+smoothing view help," not a full 320-feature port). R0 therefore does not fully close the gap to
+their 0.946064 diagnostic ceiling — expected, and consistent with the scoping.
+
+**R0 (the full reimplementation, strict twin of nothing — a new representation) reproduces the
+mechanism cleanly:**
+
+| run | change vs E1 | OOF | Δ vs E1 | features |
+|---|---|---|---|---|
+| E1 | *(old champion)* | 0.945642 | — | 16 |
+| **S1** | + shape encoder ONLY, E1's own params | **0.945787** | **+0.000145** | 32 |
+| **R2** | + everything except the shape encoder | **0.945877** | **+0.000235** | 138 |
+| **R1** | + everything except the digit block | **0.945939** | **+0.000297** | 50 |
+| **R0** | + all five ingredients, their hyperparameters | **0.945989** | **+0.000347** | 154 |
+
+`compare_oof.py` against E1 confirms it is not split luck: paired bootstrap 95% CI
+**[+0.000286, +0.000409]**, paired SE 0.000031 — **11× the SE**, identical fold assignment. The
+ablation ladder attributes the gain cleanly: the digit block alone is worth +0.00005 (R0 − R1,
+matching the read-only prediction above), the shape encoder alone is worth +0.000112 within the
+bundle (R0 − R2) and +0.000145 solo (S1 − E1) — **the single largest contributor** — and the
+remaining ~0.00018 (freq encoding + dual TE smoothing + their hyperparameters, jointly) is real but
+not attributable to one ingredient without a further probe. `leg_probe.py` against the standing
+6-leg pool: R0 **clears gate 2** on its own, ADD **+0.000308** to the pool (6-leg 0.945719 → 7-leg
+0.946027) — the first leg this competition to clear that gate solo since the pool was curated.
+
+**All five of today's slots spent, and every paired point landed as predicted or better:**
+
+| submission | OOF | predicted LB | actual LB | residual |
+|---|---|---|---|---|
+| R0 | 0.945989 | 0.94630 | **0.94614** | −0.00016 |
+| R1 | 0.945939 | 0.94624 | **0.94614** | −0.00010 |
+| **7-leg stack (R0 + old pool)** | **0.946027** | 0.94634 | **0.94616** | −0.00018 |
+| R2 *(deliberately worse — H2's trick)* | 0.945877 | 0.94617 | **0.94600** | −0.00017 |
+| S1 *(shape encoder only)* | 0.945787 | 0.94608 | **0.94608** | **+0.00000** |
+
+R2 landed correctly below R0/R1 on the LB, the same deliberately-worse-model confirmation H2 supplied
+in Phase 8 and L1 in Phase 11 — the ranker is not merely monotone-by-construction here. **Champion
+moved from the 6-leg stack (OOF 0.945719 → LB 0.94588, Phase 13) to the 7-leg stack (OOF 0.946027 →
+LB 0.94616), +0.00028 LB, +115 ranks on a same-day leaderboard snapshot (rank ~420 → ~305 of 1451).**
+`pool.json` now carries R0 as a 7th leg and `champion_stack_oof=0.946027`.
+
+**The new finding: a small, consistent, feature-bulk-proportional negative LB offset, not a
+family-specific one.** All four Phase-14-recipe submissions land **0.00010–0.00018 below** what the
+GBDT-family fit (slope 1.0832, intercept −0.0784, §4) predicts — 1–2× the instrument's own residual
+σ (0.000092), same sign, same rough size, across a solo model, an ablation, and a stack. **S1 is the
+control that localizes it**: same architecture, same family, but only the ONE ingredient (the shape
+encoder) that matters most — and its residual is **+0.00000**, dead on the fit. The offset therefore
+tracks the *amount of new feature engineering* (digit block + freq block + dual-smoothing TE +
+their hyperparameters, stacked together), not the architecture and not the shape encoder itself.
+This is a different mechanism from Phase 3/8's neural-fold-averaging bias — it is measured here
+entirely within the GBDT family — and it is a lead, not yet a probed finding: the next move, if
+pursued, is isolating which of freq/dual-TE/hyperparameters (or their combination) carries it, the
+same way S1 isolated the shape encoder from the rest.
+
+**What stays closed, what reopens.** The architecture axis (Phase 9–10, nine families) and the
+ensembling axis (Phase 8/13, zero legs in the useful quadrant except now R0 itself) are untouched by
+this phase — R0 is a GBDT on an enriched representation, not a new architecture. What reopens is the
+**encoder axis** specifically: Phase 1c/6/12 closed it against raw-value TE, binned TE, categorical
+TE and bin-resolution increases, but never tested neighbour-pooled multi-scale encoding, which is
+now the single largest lever found since Phase 1's original per-value TE discovery. The natural next
+probe — extending `te_shape_cols` to `Daily_Commute_km` and `Age`, the other two `te_cols` members —
+is untested and cheap; it was not run today because the day's slots were better spent locking in
+R0's confirmed gain than making a novel offline hypothesis without a submission to check it against.
+`experiments/runs.csv` rows `bdc92691`, `90e00e54`, `e87bed07`, `ea2531a7`, `0f742d1d`.
