@@ -666,7 +666,13 @@ def fit_predict(cfg, Xtr, ytr, Xva, yva, Xte, feats_cat):
         inter = [[i] for i in range(Xtr.shape[1])] if cfg["additive_only"] else None
         m = lgb.LGBMClassifier(random_state=cfg["model_seed"], n_jobs=-1, verbose=-1,
                                monotone_constraints=mono, interaction_constraints=inter, **p)
-        m.fit(Xtr, ytr, eval_X=Xva, eval_y=yva, eval_metric="auc",
+        # eval_set=[(Xva, yva)], not the newer eval_X=/eval_y= keyword form: the latter
+        # is only present in LightGBM 4.7+ (X3's actual failure on Kaggle's pinned
+        # older LightGBM -- "unexpected keyword argument 'eval_X'" -- since no lgb-
+        # learner run had ever previously been pushed to a Kaggle kernel; every prior
+        # lgb champion was screened locally). eval_set is the universal form present in
+        # every LightGBM version and is semantically identical to eval_X/eval_y.
+        m.fit(Xtr, ytr, eval_set=[(Xva, yva)], eval_metric="auc",
               callbacks=[lgb.early_stopping(cfg["early_stopping_rounds"], verbose=False)])
         return (m.predict_proba(Xva)[:, 1], m.predict_proba(Xte)[:, 1],
                 int(m.best_iteration_ or p["n_estimators"]))
