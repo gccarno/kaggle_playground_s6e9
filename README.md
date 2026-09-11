@@ -1130,3 +1130,172 @@ probe — extending `te_shape_cols` to `Daily_Commute_km` and `Age`, the other t
 is untested and cheap; it was not run today because the day's slots were better spent locking in
 R0's confirmed gain than making a novel offline hypothesis without a submission to check it against.
 `experiments/runs.csv` rows `bdc92691`, `90e00e54`, `e87bed07`, `ea2531a7`, `0f742d1d`.
+
+### Phase 15 — five axes closed in one day; the feature-bulk offset sharpened, not the gap (2026-09-11)
+
+Leaderboard re-read: 1,542 teams (up from 1,451), top **0.94672**, rank 50 at **0.94644**. We stood
+at rank 342, public **0.94616**. Phase 14 left one named-and-cheap probe (extend `te_shape_cols` to
+`Daily_Commute_km`/`Age`) and reopened the encoder axis generally; this phase tested that probe plus
+four more axes the day's compute made newly affordable — Kaggle CPU kernels run in parallel (capped
+at **5 concurrent sessions**, not the 2-GPU cap this repo had previously measured) rather than the
+32-second local loop, since a full 5-fold run on R0's 154-feature representation now costs
+~5-7 minutes locally, not 32 seconds.
+
+**X1 — shape-encoder granularity, closed.** A local measurement (per-bin excess-signal/expected-SE
+ratio, trend removed) predicted the ratio peaks at 1024-2048 bins and is worst at R0's own
+8192/16384 — independently corroborated by the public frontier's much coarser `//100`/`//1000`
+"smooth keys". The prediction was wrong in its practical conclusion:
+
+| bins | OOF | Δ vs R0 (0.945989) |
+|---|---|---|
+| `[1024,4096]` | 0.945974 | −0.000015 |
+| `[2048,8192]` | 0.946009 | **+0.000020** (best, still under the seed floor) |
+| `[512,2048,8192]` | 0.946008 | +0.000019 |
+| `[1024,4096,16384]` | 0.945989 | 0.000000 |
+| `[256,1024]` | 0.945917 | **−0.000072** |
+
+Every grid from 1024 to 16384 bins lands within the 0.000038 seed-noise floor of R0 — the axis is
+flat, not peaked, across that whole range. Only pushing to genuinely coarse (256/1024) costs real
+signal. **The local per-bin SNR calculation was correct about local rate-estimate precision and
+still didn't predict the model's behaviour**: R0's neighborhood backoff on the raw per-value
+`te_cols` already supplies a smoothed local estimate, so the shape encoder's job is adding the
+slope/curvature *derivative* information on top of that, and this is apparently insensitive to
+exactly how many bins carry it, provided there are enough to keep the derivative meaningful. Mirrors
+H1's "we already compute this" finding (Phase 2c) one level down.
+
+**X2 — five ingredient twins of R0, all closed.**
+
+| probe | change | OOF | Δ vs R0 |
+|---|---|---|---|
+| Ia | `fe_recipe_score: false` | 0.945995 | +0.000006 |
+| Ib | `te_multi_smooth: [10,"auto",100]` | 0.946008 | +0.000019 |
+| Ic | `te_inner_folds: 5→10` | 0.945969 | −0.000020 |
+| Id | `te_shape_cols` + `Daily_Commute_km` | 0.945964 | −0.000025 |
+| Ie | `te_shape_cols` + commute + `Age` | 0.945956 | −0.000033 |
+
+**Ia is the interesting null.** P3 (Phase 12) measured `fe_recipe_score` (the ORIGIN generator's
+fixed-coefficient `buy_score`/`worry_score`) at **−0.000144** on E1's 16-feature representation —
+displacement, the F1/H2/H3/O1 signature. On R0's 154-feature representation the same feature is a
+dead null (+0.000006). Read together with R0's `best_iter` (777-1098, nowhere near F1/H2/H3's
+collapse to 300-450): the richer representation's per-feature shapes are no longer being fully
+resolved before the tree runs out of budget the way E1's leaner one was, so a coarse composite
+column that used to compete for early rounds no longer measurably displaces anything. **Id/Ie land
+exactly as pre-registered** — commute (830 rows/value) and age (14,859 rows/value) have almost no
+per-value SE left to cut by pooling, so extending the shape encoder to them is closer to redundant
+columns than to new signal, and the small negative deltas are consistent with that reading, not with
+a real cost.
+
+**X3 — Optuna HPO on R0's representation, closed, and instructively so.** No hyperparameter search
+existed in this repo; `scripts/optuna_probe.py` is new, single-fold (fold 0), reuses
+`pipeline.py`'s own feature/encoder/`fit_predict` functions, and — for wall-clock only, after TE
+fitting — subsamples the fold-0 **training** rows to 40%. Four independent Optuna studies (distinct
+sampler seeds, 80 trials each, 320 trials total) ran as four parallel Kaggle CPU kernels and
+converged tightly on one region, sharply different from R0's borrowed (public-notebook) params:
+
+| | R0 (borrowed) | HPO consensus (4/4 shards) |
+|---|---|---|
+| `max_depth` | 5 | **4**, all four shards |
+| `learning_rate` | 0.02 | **0.011-0.014**, all four shards |
+| `min_child_samples` | 10 | **35-96**, all four shards |
+| `colsample_bytree` | 0.303 | 0.22-0.32 |
+
+The three best-looking trials (highest single-fold AUC on the 40%-subsample screen), confirmed on
+the **full** 535k-row, 5-fold data:
+
+| probe | OOF | Δ vs R0 |
+|---|---|---|
+| best of shard 2 (AUC 0.944848 on screen) | 0.945996 | +0.000007 |
+| best of shard 3 (AUC 0.944827 on screen) | 0.945984 | −0.000005 |
+| consensus (median across all 4 shards) | 0.945989 | **0.000000** |
+
+**All three collapse to noise on full data.** The mechanism is a clean, well-understood screening
+artifact, not a bug: HPO on a 40%-subsampled single fold rationally favours *more* regularization
+(shallower trees, slower learning, higher leaf-occupancy floor) because less data has more variance
+to guard against — and that extra regularization buys nothing once the model sees the full 535k
+rows. **R0's borrowed hyperparameters, despite being tuned for a different feature count and fold
+count, are already at or near the full-data optimum for this representation.** A harness bug was
+found and fixed along the way (below); this HPO result is not an artifact of that fix, since the
+full-data confirmations ran after the fix on the corrected code path.
+
+**X4 — does 10-fold explain the frontier's residual gap? Refuted, cleanly, with a slot.** The
+public frontier notebook's own published OOF scores 0.946064 on our split — only +0.000075 over R0
+— yet its LB (0.94637) beats R0's (0.94614) by +0.00023, a gap the OOF comparison alone can't
+explain. Every frontier notebook read this competition trains on 10 folds, not 5; a test row is then
+averaged over 10 fold-models instead of 5, the same mechanism Phase 3/4 measured as a real,
+quantified bias for early-stopped neural nets (G1: +0.00105 raw, +0.00048 after in-fold bagging).
+Pre-registered: **ΔLB ≥ +0.00015 supports fold-averaging and reopens fold count; below +0.00008
+closes it.** R0's exact recipe at `n_folds=10` (OOF 0.946122, *not comparable* to any 5-fold run,
+excluded from `pool.json` and the OOF→LB regression by design) scored **LB 0.94617** — **+0.00001**
+over R0's 5-fold 0.94614. **Refuted, not merely null: the frontier's 0.00023 residual gap is not a
+fold-count artifact.** The mechanism that explains neural nets' fold-averaging bias does not
+transfer to a 1000+-round GBDT the way Phase 3 itself already predicted (test predictions are
+"already 5-way fold-averaged and had little room to gain" — Phase 4's own words, now confirmed for
+10-vs-5 as well as bagged-vs-not). What remains unexplained about the frontier's extra 0.00023 is
+still open; X1-X3 above rule out the shape-encoder granularity, four cheap ingredient corners, and
+LightGBM hyperparameters as the source, so it most plausibly sits in ingredients this repo
+deliberately scoped narrower in Phase 14 (dual vs. triple-smoothing TE covering only 3 keys vs.
+their ~61, or the "smooth keys" string-categorical representation, which is structurally different
+from a numeric per-value key) — a new probe, not a re-read of today's.
+
+**X5 — cross-family legs on the new representation, closed by measurement.** The pool was stranded:
+6 of 7 legs on the old 16-feature E1 representation, only R0 itself on the new one. Trained the
+first two cross-family legs on R0's exact feature config:
+
+| leg | solo OOF | max corr vs pool | ADD to 7-leg stack |
+|---|---|---|---|
+| `xgb` (E4r0) | 0.945941 | 0.9986 vs R0 | 0.946027→0.946035, **+0.000009**, miss |
+| `cat` | 0.945886 | 0.9915 vs F2 | 0.946027→0.946051, **+0.000025**, miss |
+| both together (9-leg stack) | — | — | 0.946027→**0.946055**, **+0.000028**, miss |
+
+Both miss gate 2 solo, and combined they still miss it — the highest OOF on record this competition
+(0.946055) still isn't a 0.0002 ADD. **Mechanism: near-twin, again.** `xgb`/`cat` on the *identical*
+feature representation as `R0` correlate 0.99+ with it, playbook §7's "same truth, same mistakes"
+signature repeating on the new representation exactly as it did on the old one (E1/E4/E5 in Phase 3)
+— changing the learner without changing the representation is not a diversity lever here either.
+
+**A harness bug, found and fixed, not a probe.** X3's first HPO push failed on trial 0:
+`LGBMClassifier.fit() got an unexpected keyword argument 'eval_X'`. `pipeline.py`'s `lgb` branch used
+the `eval_X=`/`eval_y=` keyword form, present only in LightGBM 4.7+ (this repo's local pinned
+version) and absent from Kaggle's older pinned LightGBM. **No `lgb`-learner run had ever previously
+been pushed to a Kaggle kernel** — every `lgb` champion since Phase 0 was screened locally — so this
+portability gap was latent for the whole competition until today's HPO kernels were the first `lgb`
+code path ever executed on Kaggle. Fixed to the universal `eval_set=[(Xva, yva)]` form, verified
+bit-identical to `eval_X=`/`eval_y=` on a synthetic fit (same `best_iteration_`, max abs prediction
+diff 0.0) before trusting any result built on it — every archived run's result is unaffected.
+
+**Five slots spent, all on instrument points, since nothing cleared the shipping gate.** Per
+playbook §1's rule, unused slots are wasted paired points, not saved ones:
+
+| submission | OOF | predicted LB (GBDT fit) | actual LB | residual |
+|---|---|---|---|---|
+| X4 (R0 @ 10-fold) | *(n/a, 10-fold)* | — | 0.94617 | — |
+| 9-leg stack | 0.946055 | 0.94637 | 0.94614 | **−0.00023** |
+| G2 (`[2048,8192]`) | 0.946009 | 0.94632 | 0.94612 | −0.00020 |
+| `xgb` solo (E4r0) | 0.945941 | 0.94624 | 0.94610 | −0.00014 |
+| G5 (`[256,1024]`, *deliberately worse*) | 0.945917 | 0.94622 | 0.94610 | −0.00012 |
+
+*(for reference: R0 solo residual −0.00016, 7-leg champion stack residual −0.00018, both from Phase 14)*
+
+**Two real findings inside what looks like a flat day of nulls.** First, **G5 is the fourth
+deliberately-worse-model check to pass** (after H2 in Phase 8, L1 in Phase 11, R2 in Phase 14): its
+LB (0.94610) is correctly the lowest of the five, confirming the ranker still discriminates
+correctly at this richer, 154-feature representation. Second, and new: **the feature-bulk-
+proportional negative offset Phase 14 found (S1 at +0.00000, the four richer-recipe points at
+−0.00010 to −0.00018) now holds across a different learner** (`xgb` solo: −0.00014, essentially
+R0's own −0.00016) **and gets WORSE when legs are stacked, monotonically with stack size** (solo
+~−0.00012 to −0.00016, 7-leg −0.00018, 9-leg −0.00023). This is exactly why the 9-leg stack's higher
+OOF (0.946055 vs the 7-leg champion's 0.946027) produced a *lower* LB (0.94614 vs 0.94616) — a real
+inversion, and precisely the case the ADD gate exists to catch: **the gate correctly refused to
+promote the 9-leg stack**, and the LB confirms that refusal was right, not merely conservative.
+
+**Verdict: every axis this round tested closes, and today extends Phase 14's two most important
+findings rather than reopening either.** Encoder granularity, four ingredient corners, LightGBM
+hyperparameters, and cross-family legs on the new representation are now measured closed on top of
+Phase 0-13's list. The champion is unchanged: the 7-leg stack, OOF 0.946027 → LB 0.94616. The
+frontier's remaining ~0.00023 residual gap is narrowed (fold count is ruled out) but not closed;
+the next candidates are the triple- vs. dual-smoothing TE coverage gap and the string-categorical
+"smooth keys" representation, both flagged, neither run. `experiments/runs.csv` rows include
+`77c52611`, `47838d89`, `2a552362`, `023f3e27`, `11872e0c` (X2), `f602a9f5`, `f5b957d4`, `9d3ff376`,
+`4fb4705f`, `a1e0ca8e` (X1), `f8881980`, `2463e900`, `a16f0116`, `d3622bdc` (X3 shards),
+`6fcd493b`, `d68bf43c`, `6ebe2430` (X3 confirm), `e1495238` (X4), `7c151fb7`, `d300b5ff`,
+`826f0978` (X5).
