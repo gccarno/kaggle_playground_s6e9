@@ -17,7 +17,7 @@ fold ONLY. Target encoding additionally uses an inner K-fold within the training
 produce the training rows' own encodings, so the learner never sees a value's encoding
 computed from that same row's label.
 """
-import json, os, sys, time, warnings
+import gc, json, os, sys, time, warnings
 from pathlib import Path
 
 import numpy as np
@@ -143,6 +143,24 @@ DEFAULTS = {
     "te_shape_cols": [],
     "te_shape_bins": [8192, 16384],
     "te_shape_smooth": 10.0,
+    # SUPERVISED CENTRED-WINDOW target rates: for each radius r in te_window_radii, the
+    # smoothed positive rate over every TRAINING-FOLD row whose value lies in [v-r, v+r].
+    # MECHANISM (see apply_window_target_encoding): te_shape_cols pools neighbours through
+    # a FIXED bin grid, so a value near a bin edge pools asymmetrically and its pooling
+    # radius is whatever the grid width happens to be. A centred window always puts the
+    # value at the centre of its own neighbourhood, at several scales at once. Phase 15's
+    # X1 measured the shape encoder as FLAT from 1024 to 16384 bins, which says the grid's
+    # width was never the binding limitation -- its arbitrary origin is the candidate this
+    # axis tests. Radii are in the column's own units (dollars for income, km for commute).
+    "te_window_cols": [],
+    "te_window_radii": [2, 5, 10, 25, 50, 200],
+    "te_window_smooth": 10.0,
+    "te_window_count": False,   # also emit log1p(window occupancy) per radius
+    # UNSUPERVISED quantisation ladder: floor(v / d) per divisor, the public frontier's
+    # "smooth keys" (flagged untested at the end of Phase 15). Built in base_features, so
+    # the resulting q_{col}_{d} columns can themselves be named in te_cols / freq_cols.
+    "fe_quant_cols": [],
+    "fe_quant_divisors": [10, 50, 500, 5000],
     "te_cols": [],                   # SUPERVISED per-value target encoding (fold-fit)
     "te_smooth": 20.0,               # additive smoothing toward the backoff target
     # When non-empty, emit ONE TE COLUMN PER SMOOTHING VALUE instead of a single te_smooth
@@ -317,6 +335,22 @@ def base_features(train, test, cfg):
                 counts = pd.concat([tr[dname], te[dname]]).value_counts()
                 tr[name] = np.log1p(tr[dname].map(counts).astype(float).values)
                 te[name] = np.log1p(te[dname].map(counts).astype(float).values)
+                feats_num.append(name)
+
+    if cfg["fe_quant_cols"]:
+        # UNSUPERVISED quantisation ladder: floor(v / d) for each divisor in
+        # fe_quant_divisors -- the public frontier's "smooth keys", flagged as untested
+        # at the end of Phase 15 and never run. Distinct from fe_digit_cols (which takes
+        # a value's DIGIT, floor(v/10**p) % 10, discarding the magnitude) and from
+        # te_shape_cols (equal-width bins fit per fold): a ladder key keeps the ordering
+        # and the magnitude, just at a coarser resolution, and -- because it is computed
+        # here rather than inside the fold -- it can be named in te_cols/freq_cols like
+        # any other column. Safe to compute once over train union test: no target read.
+        for c in cfg["fe_quant_cols"]:
+            for d in cfg["fe_quant_divisors"]:
+                name = f"q_{c}_{d}"
+                tr[name] = np.floor_divide(tr[c].to_numpy(np.float64), float(d))
+                te[name] = np.floor_divide(te[c].to_numpy(np.float64), float(d))
                 feats_num.append(name)
 
     if cfg["cat_cols"]:
@@ -648,6 +682,97 @@ def apply_shape_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
     return new_cols
 
 
+def _window_rates(v_fit, y_fit, v_query, radii, prior, smooth):
+    """Smoothed positive rate over every fit row whose value lies in [q-r, q+r].
+
+    Supervised -- callers must pass a TRAINING-FOLD slice as (v_fit, y_fit).
+
+    Sort the fit values once, take a prefix sum of the labels, and each radius is then
+    two np.searchsorted calls per query row: O(n log n) once plus O(n log n) per radius,
+    which keeps a 6-radius encoder inside the same wall-clock budget as the bin encoder.
+    Smoothing arithmetic is _fit_encoder's: (sum + smooth*prior) / (count + smooth).
+
+    Returns (rates, counts), each (len(v_query), len(radii)).
+    """
+    order = np.argsort(v_fit, kind="mergesort")
+    vs, ys = v_fit[order], y_fit[order].astype(np.float64)
+    cs_sum = np.r_[0.0, np.cumsum(ys)]
+    cs_cnt = np.arange(len(vs) + 1, dtype=np.float64)
+    rates = np.empty((len(v_query), len(radii)), dtype=np.float64)
+    counts = np.empty_like(rates)
+    for k, r in enumerate(radii):
+        lo = np.searchsorted(vs, v_query - r, side="left")
+        hi = np.searchsorted(vs, v_query + r, side="right")
+        s, n = cs_sum[hi] - cs_sum[lo], cs_cnt[hi] - cs_cnt[lo]
+        rates[:, k] = (s + smooth * prior) / (n + smooth)
+        counts[:, k] = n
+    return rates, counts
+
+
+def apply_window_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
+    """SUPERVISED CENTRED-WINDOW target rates for a NUMERIC column, one column per
+    radius in cfg["te_window_radii"], fit on the TRAINING FOLD ONLY.
+
+    MECHANISM, and why this is not te_shape_cols again (README Phase 14/15). The shape
+    encoder pools neighbours through a FIXED equal-width bin grid: which rows a value
+    pools with depends on where the value falls inside its bin, so a value sitting at a
+    bin edge pools asymmetrically, and the pooling radius is whatever the grid width
+    happens to be. A centred window pools SYMMETRICALLY around the value itself, at
+    several radii at once, so the same value always sits at the centre of its own
+    neighbourhood. Phase 15's X1 found the shape encoder flat from 1024 to 16384 bins --
+    the grid resolution did not matter -- which is consistent with the grid's real
+    limitation being its ARBITRARY ORIGIN rather than its width, and that is exactly what
+    a centred window removes. Read as an idea (not as code or artifact) from the public
+    frontier's "centred-window target rates" description; reimplemented here under this
+    repo's own leakage protocol.
+
+    Leakage protocol mirrors apply_target_encoding / apply_shape_target_encoding: the
+    windows are built from Xtr only; training rows get theirs from an inner K-fold, so a
+    row's own label never enters its own window (a window ALWAYS contains the query value
+    itself, so without this the encoder memorizes outright -- the same failure per-value
+    TE has); val and test rows use the full training-fold statistics.
+    """
+    prior = float(ytr.mean())
+    radii = list(cfg["te_window_radii"])
+    smooth = float(cfg["te_window_smooth"])
+    new_cols = []
+    for c in cols:
+        v_tr = Xtr[c].to_numpy(np.float64)
+        v_va = Xva[c].to_numpy(np.float64)
+        v_te = Xte[c].to_numpy(np.float64)
+        names = [f"tewin_{c}_r{r}" for r in radii]
+
+        rate_tr = np.zeros((len(v_tr), len(radii)), dtype=np.float64)
+        cnt_tr = np.zeros_like(rate_tr)
+        inner = StratifiedKFold(cfg["te_inner_folds"], shuffle=True,
+                                random_state=rng_seed)
+        for i, j in inner.split(v_tr.reshape(-1, 1), ytr):
+            rate_tr[j], cnt_tr[j] = _window_rates(v_tr[i], ytr[i], v_tr[j], radii,
+                                                  float(ytr[i].mean()), smooth)
+        for k, nm in enumerate(names):
+            Xtr[nm] = rate_tr[:, k]
+
+        out = {}
+        for key, X, v in (("va", Xva, v_va), ("te", Xte, v_te)):
+            out[key] = _window_rates(v_tr, ytr, v, radii, prior, smooth)
+            for k, nm in enumerate(names):
+                X[nm] = out[key][0][:, k]
+        new_cols += names
+
+        if cfg["te_window_count"]:
+            # Window occupancy: how many training-fold rows the rate was built from, so
+            # the tree can discount a radius that is empty for this value. Counts do not
+            # depend on the labels, but they are still fold-fit, so they ride along here
+            # rather than in base_features.
+            cnames = [f"tewin_{c}_r{r}_n" for r in radii]
+            for k, nm in enumerate(cnames):
+                Xtr[nm] = np.log1p(cnt_tr[:, k])
+                Xva[nm] = np.log1p(out["va"][1][:, k])
+                Xte[nm] = np.log1p(out["te"][1][:, k])
+            new_cols += cnames
+    return new_cols
+
+
 # ----------------------------------------------------------------------- learners
 def fit_predict(cfg, Xtr, ytr, Xva, yva, Xte, feats_cat):
     """Return (val_proba, test_proba, best_iteration). AUC is the eval metric everywhere."""
@@ -954,6 +1079,9 @@ def main():
         if cfg["te_shape_cols"]:
             apply_shape_target_encoding(Xtr, ytr, Xva, Xte, cfg["te_shape_cols"], cfg,
                                         cfg["cv_seed"] + f)
+        if cfg["te_window_cols"]:
+            apply_window_target_encoding(Xtr, ytr, Xva, Xte, cfg["te_window_cols"], cfg,
+                                         cfg["cv_seed"] + f)
 
         n_model_features = Xtr.shape[1]
         # Seed-bagging INSIDE a fold averages several models trained on the same rows,
@@ -972,6 +1100,16 @@ def main():
         fold_aucs.append(roc_auc_score(yva, pv))
         best_iters.append(bi)
         print(f"fold {f}  auc={fold_aucs[-1]:.6f}  best_iter={bi}", flush=True)
+
+        # Release this fold's encoded frames BEFORE the next iteration builds its own.
+        # Without this, `train[feats].iloc[i].copy()` for fold f+1 is evaluated while
+        # fold f's Xtr/Xva/Xte are still referenced, so peak RSS is two folds' worth of
+        # a (535k x n_features) float64 matrix rather than one. At R0's 154 features
+        # that is ~1.3GB of avoidable peak, which is the difference between running and
+        # being OOM-killed on a 16GB machine once a probe pushes past ~165 features.
+        # Purely a memory fix: nothing here touches a computed value.
+        del Xtr, Xva, Xte, pv, pt
+        gc.collect()
 
     final_auc = roc_auc_score(y, oof)
     lr = cfg["learner"]
