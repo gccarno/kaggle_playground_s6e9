@@ -1299,3 +1299,132 @@ the next candidates are the triple- vs. dual-smoothing TE coverage gap and the s
 `4fb4705f`, `a1e0ca8e` (X1), `f8881980`, `2463e900`, `a16f0116`, `d3622bdc` (X3 shards),
 `6fcd493b`, `d68bf43c`, `6ebe2430` (X3 confirm), `e1495238` (X4), `7c151fb7`, `d300b5ff`,
 `826f0978` (X5).
+
+### Phase 16 — the window encoder replaces the shape encoder; new champion, +0.00007 LB (2026-09-12)
+
+Leaderboard re-read: **1,632 teams**, top 0.94672, rank 100 at 0.94644, rank 200 at 0.94637.
+We stood at rank 369 on 0.94617. The 49-team spike at 0.94644 is **not a model** — it traces to
+`talhatursun/s6e9-daily-rank-average-ensemble`, a rank-average of public submission files, which
+§5 puts out of bounds until the 2026-09-21 reassessment and which is not a modelling lever anyway.
+
+**The day's lead came from `megayak/s6e9-0-94645-four-feature-views-beat-the-blend`** (read for
+ideas only, per §5), which reports on its own 10-fold split that a different *learner* on identical
+features adds nothing (corr 0.9995 — our own X5 result, independently reproduced) while two
+different *feature views* do add at corr 0.9979–0.9989. Its two untested ingredients: **centred-
+window target rates** (the smoothed buy rate over income `v±2…±200`) and a **quantisation ladder**
+(`//10, //50, //500, //5000`) used instead of the exact-value key.
+
+**Step 0 killed the ensemble half of that before a line of model code was written.** Their published
+four-member OOF was scored against our labels as a *diagnostic* (the Phase 14 move, §5-permitted):
+
+| added to our 7-leg stack (0.946024 refit) | ADD |
+|---|---|
+| A (their best) | +0.000070 |
+| C (the windows view) | +0.000064 |
+| D (the ladder view) | +0.000064 |
+| **all four together** | **+0.000065** |
+| C, *given A is already in* | **+0.000000** |
+| D, given A already in | −0.000002 |
+
+All four correlate with `R0` at Spearman 0.9952–0.9953 — indistinguishably, and no further from R0
+than R0 is from our own E1 (0.99569). **Their four views carry exactly one model's worth of
+information relative to our pool.** The "+0.00003 per view" is their own pool's redundancy
+structure, not transferable signal. The view-ensemble build was abandoned on this measurement; the
+*ingredients* were then tested as single-model levers, which is where the value turned out to be.
+
+**Two new config axes**, both default-off so every archived run stays bit-identical (R0's cfg
+re-run after the edits reproduces OOF 0.945989 and all five fold AUCs exactly):
+`apply_window_target_encoding` / `te_window_cols` / `te_window_radii`, and `fe_quant_cols` /
+`fe_quant_divisors`. Leak control passed before any probe was trusted: a random 13,214-value key
+scores **0.4959–0.5019** through the same inner-fold path, and real income's train-row AUC sits
+*below* its val-row AUC (0.709 vs 0.714) — the correct sign, since the inner-fold encoding is
+noisier than the full-fold one.
+
+| probe | change | feats | OOF | Δ vs R0 | LB | residual |
+|---|---|---|---|---|---|---|
+| **WQ** | + windows + ladder | 172 | **0.946086** | **+0.000097** | **0.94624** | −0.00016 |
+| Q1 | + ladder (added to the exact key) | 166 | 0.946067 | +0.000078 | — | — |
+| **WS** | windows **replacing** the shape encoder | 144 | 0.946051 | +0.000062 | 0.94614 | −0.00022 |
+| LWQ | lean base (no digits) + windows + ladder | 52 | 0.946046 | +0.000057 | — | — |
+| W1 | + windows (shape encoder kept) | 160 | 0.946035 | +0.000046 | 0.94617 | −0.00018 |
+| LW | lean base + windows replacing shape | 40 | 0.946002 | +0.000013 | 0.94615 | −0.00016 |
+| LWQE | LWQ on E1's hyperparameters | 52 | 0.945896 | −0.000093 | — | — |
+| W2 | S1 (lean, E1 params) + windows | 38 | 0.945881 | −0.000108 | 0.94617 | **−0.00001** |
+| Q2 | ladder **replacing** the exact-value key | 164 | 0.945849 | −0.000140 | — | — |
+| LWE | LW on E1's hyperparameters | 40 | 0.945803 | −0.000186 | — | — |
+
+**1. The centred window is the shape encoder, better parameterised — and keeping both is worse than
+keeping one.** WS (windows only, 144 features) beats both R0 (shape only, 154) by +0.000062 and W1
+(both, 160) by +0.000016. The fixed equal-width grid pools a value asymmetrically when it falls near
+a bin edge, and its radius is whatever the grid width happens to be; a centred window puts the value
+at the centre of its own neighbourhood at six scales at once. This explains Phase 15's X1 null
+(the encoder was *flat* from 1024 to 16384 bins): grid **width** was never the binding limitation,
+the arbitrary **origin** was, and X1 could not see that because every setting it tried shared the
+defect. **`te_shape_cols` is now superseded by `te_window_cols`** and should not appear in new
+recipes.
+
+**2. The ladder adds as a supplement and fails as a replacement, which localizes what it is.**
+Q1 (+0.000078, added alongside the exact key) against Q2 (−0.000140, replacing it). Our key
+resolutions previously jumped straight from the exact value (13,214 levels, rate SE ~0.053) to the
+backoff neighbourhood (200 quantile bins); `//50` (3,160 levels) and `//500` (316) are real
+intermediate resolutions. But they cannot carry the per-value lookup itself — Phase 1's B4/B6 result
+stands, and Q2's `best_iter` (1076–1386, no collapse) says the loss is information, not displacement.
+WQ combines them at **78% of the additive prediction** (+0.000097 against +0.000124) — mild
+redundancy, not Phase 1c's strong C1/C2/C4 collapse.
+
+**3. A false trail, recorded because the experiment that refuted it is the interesting part.**
+Mid-session a strong-looking result appeared: LB residual regressed on feature count gave
+r = −0.727, p = 0.0004, with lean (≤40 feats) runs at mean −0.00004 and rich (≥130) at −0.00016,
+Welch p < 0.0001. It predicted a lean model would land on the raw fit and a rich one 0.00016 below.
+**W2 (38 feats) landed at −0.00001 and LW (40 feats) at −0.00016** — near-identical feature counts,
+opposite bands. The variable is the **hyperparameter family**, not feature bulk: E1's params
+(7 leaves, lr 0.05) average residual −0.00004 (n=5, sd 0.00004) against R0's borrowed params
+(31 leaves, depth 5, lr 0.02, max_bin 1024) at −0.00015 (n=6, sd 0.00004), Welch **p = 0.0014** —
+and feature count explains nothing *within* either family (p = 0.147, p = 0.987). Every rich run had
+inherited R0's params in Phase 14 and every lean run kept E1's, so the two were perfectly confounded
+until today's W2/LW pair broke them apart. **This corrects Phase 15's X3**, which concluded R0's
+borrowed hyperparameters were "already at or near the full-data optimum" — true on OOF, and on the
+board they cost ~0.00011.
+
+**4. The offset is real and NOT harvestable, which is the practically important half.** LWE and LWQE
+put today's ingredients on E1's hyperparameters and lost 0.000186 / 0.000093 of OOF, with `best_iter`
+collapsing to 358–536 and 420–728 against LW's 1075–1355 — plain under-capacity: 7 leaves at lr 0.05
+cannot carry 40+ features with the freq block and dual TE. The params that avoid the penalty cannot
+fit the representation that earns the score. **The open lead is whether something between 7 and 31
+leaves gets the OOF without the offset** — untested, and the first thing to probe next.
+
+**5. A plateau reading I made and the board refuted within the hour.** R0 (0.94614), W1 (0.94617)
+and WS (0.94614) span 0.000062 in OOF and land within 0.00003 on the board, and I read that as "OOF
+gains no longer reach the leaderboard on this representation." WQ then took the largest OOF gain of
+the day (+0.000097) and produced **+0.00010 of LB over R0**. The three earlier points were simply
+closer together than the near-twin paired resolution (0.000027) can resolve; the instrument was
+working the whole time. Playbook §5 is the post-mortem of exactly this kind of over-read, and it
+applied here to a conclusion drawn from three points in a single afternoon.
+
+**Five slots spent, every one a paired point:**
+
+| submission | OOF | raw predicted LB | actual LB | residual |
+|---|---|---|---|---|
+| **WQ** | 0.946086 | 0.94640 | **0.94624** | −0.00016 |
+| W1 | 0.946035 | 0.94635 | 0.94617 | −0.00018 |
+| W2 *(lean control)* | 0.945881 | 0.94618 | 0.94617 | **−0.00001** |
+| LW *(the refutation)* | 0.946002 | 0.94631 | 0.94615 | −0.00016 |
+| WS | 0.946051 | 0.94636 | 0.94614 | −0.00022 |
+
+**Champion moves from the 7-leg stack (OOF 0.946027 → LB 0.94616) to `WQ` solo (OOF 0.946086 →
+LB 0.94624), +0.00007 LB** — and WQ beats the old champion on OOF and LB simultaneously. WQ's ADD to
+the 7-leg pool is +0.000100, missing the +0.0002 leg gate, so the 8-leg *stack* (OOF 0.946127, the
+highest recorded here) was **not** shipped — Phase 15's inversion is the precedent, and there was no
+slot left to check it. `pool.json` now carries WQ as an 8th leg with `champion_stack_oof=0.946127`
+as the baseline for future ADD tests; **verifying that stack is the first slot tomorrow.**
+
+*Harness notes.* Local runs hit a hard memory ceiling — a 5-fold fit on a 160+-feature
+representation peaks above what a 16GB machine has free, and four probes were OOM-killed mid-fold.
+Two fixes: the fold loop now releases its encoded frames before the next iteration allocates its own
+(peak was two folds' worth of a 535k × n_features float64 matrix), and `scripts/make_probe_kernel.py`
+generates a one-off Kaggle CPU kernel per probe, which restored the 5-way parallelism Phase 15 used.
+Kernels clone from GitHub, so **a probe kernel built against an unpushed `pipeline.py` silently runs
+the previous revision** — push first. One real mistake: racing a `--no-push` re-collection against a
+still-running background collector archived Q1 and WQ **twice each**, under different run_ids
+(`d6ca7bd5`/`e9dcd2ff`, `7d456f26`/`529fbde2`) with identical OOF. The rows are left in place —
+`runs.csv` is append-only — but **de-duplicate on `run_tag` before any re-analysis of this phase.**

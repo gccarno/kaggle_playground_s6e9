@@ -23,11 +23,14 @@ re-litigate its conclusions; test them here as probes if they need testing.
 
 Three things reshape the workflow relative to S6E8, and each has a consequence:
 
-1. **The dataset is small and fast.** A full 5-fold LightGBM runs in **32 seconds** on local CPU
-   (S6E8: ~5 minutes local, ~15 minutes per kernel push-poll cycle). **Iterate locally.** Kaggle
-   kernels are for GPU/neural legs and for the champion's reproducible record — not for screening.
-   A probe that would have cost a kernel cycle in S6E8 costs less than a minute here, so the
-   binding constraint is thinking, not compute. Run more probes.
+1. **The dataset is small and fast — but this stopped being true for the champion recipe.** Phase 0's
+   16-feature baseline ran in 32 seconds; the Phase 14+ recipe carries 150-170 features and a
+   5-fold run peaks above what a 16GB machine has free (Phase 16 lost four probes to the OOM
+   killer). **Screen small probes locally, fan large ones out to Kaggle CPU kernels** via
+   `scripts/make_probe_kernel.py`, 5 concurrent. The original note follows, still true for lean
+   recipes: a full 5-fold LightGBM runs in **32 seconds** on local CPU
+   (S6E8: ~5 minutes local, ~15 minutes per kernel push-poll cycle). Either way the binding
+   constraint is thinking, not compute. Run more probes.
 2. **The generator is additive in log-odds, and its strongest column is a lookup table.**
    Two separate measured facts, and they point in different directions — do not collapse them.
    *(a)* A plain additive GLM reaches OOF 0.938402 and adding all 28 pairwise interactions among the
@@ -59,6 +62,10 @@ table — there is nothing there.
   archive artifacts, optionally submit, append a row to `experiments/runs.csv`.
 - `scripts/collect_run.py` — kernel equivalent: push → poll → parse `RUN_METRICS_JSON` → archive →
   submit → log.
+- `scripts/make_probe_kernel.py` — generate a one-off Kaggle CPU kernel for one config override, so
+  probes fan out 5-wide. **Needed since Phase 16: a 5-fold fit on a 160+-feature representation no
+  longer fits in local RAM.** The kernel clones this repo from GitHub, so **push before you push a
+  kernel** — otherwise it silently runs the previous revision.
 - `scripts/stack_logit.py`, `leg_probe.py`, `leg_swap.py`, `leg_diversity.py`, `subset_ceiling.py`,
   `compare_oof.py`, `public_gap.py` — ensemble/analysis toolkit ported from S6E8.
 - `experiments/runs.csv` — **tracked in git**, append-only, one row per run. The single most
