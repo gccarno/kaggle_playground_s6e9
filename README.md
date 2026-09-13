@@ -1428,3 +1428,59 @@ the previous revision** — push first. One real mistake: racing a `--no-push` r
 still-running background collector archived Q1 and WQ **twice each**, under different run_ids
 (`d6ca7bd5`/`e9dcd2ff`, `7d456f26`/`529fbde2`) with identical OOF. The rows are left in place —
 `runs.csv` is append-only — but **de-duplicate on `run_tag` before any re-analysis of this phase.**
+
+### Phase 16b — the 8-leg stack, checked; the ADD gate's refusal holds (2026-09-13)
+
+Phase 16 ended with one candidate unchecked: WQ's ADD to the 7-leg pool was +0.000100, missing the
++0.0002 leg gate, so the 8-leg stack (OOF **0.946127**, the highest recorded in this competition)
+was not shipped and no slot remained to test whether the gate was right to refuse it.
+
+Pre-registered before submitting: raw GBDT-fit prediction **0.94644**; the stack-family residual band
+(−0.00012 to −0.00023 across the 6-, 7-, 9- and 11-leg stacks) puts the expectation at
+**0.94621–0.94626**, straddling WQ solo's actual 0.94624. ≥0.94627 promotes the stack; ≤0.94621
+confirms Phase 15's inversion reading.
+
+**Result: LB 0.94625, residual −0.00019** — mid-band, clearing neither gate.
+
+| | OOF | raw pred | LB | residual |
+|---|---|---|---|---|
+| WQ solo *(champion)* | 0.946086 | 0.94640 | 0.94624 | −0.00016 |
+| **8-leg stack** | **0.946127** | 0.94644 | **0.94625** | **−0.00019** |
+
+**The stack's +0.000041 OOF over WQ solo produced +0.00001 on the board** — an order of magnitude
+inside the near-twin paired resolution (0.000027), i.e. a wash. **The champion does not move: WQ
+solo stays.** The ADD gate refused this stack at +0.000100, and the leaderboard neither confirms nor
+contradicts that refusal so much as it makes the question moot — the two artifacts are the same
+score. Between two indistinguishable candidates the repo takes the simpler one: a single model
+carries no meta-fit optimism, and Phase 15's 9-leg inversion is the standing precedent for stack
+size buying OOF and paying it back in offset. `pool.json` keeps `champion_stack_oof=0.946127`, now a
+*verified* number rather than a projected one.
+
+**One genuinely new structural fact: the first negative stack weight of this competition.**
+
+| leg | solo | weight |
+|---|---|---|
+| **WQ** | 0.9461 | **1.9877** |
+| R0 | 0.9460 | 0.6485 |
+| E4 | 0.9457 | 0.5234 |
+| **D2** | 0.9454 | **−0.3787** |
+| E1 / F2 / E4d / E2 | 0.9455–0.9456 | 0.08–0.15 |
+
+Phase 2 recorded "**0 of 6 weights negative**" against S6E8's 10 of 23, and read it as the signature
+of a pool of near-twins: playbook §6 says a fitted combiner earns its keep by SUBTRACTING correlated
+error, and there was nothing to subtract. WQ's arrival changes that — it takes weight 1.99, three
+times R0's, and the combiner now *subtracts* D2, the pool's weakest and oldest leg. So §6's
+discriminator has finally fired here. **It fired without paying**: +0.000041 OOF, +0.00001 LB. The
+mechanism being available is not the same as there being correlated error worth removing, and one
+negative weight on an 8-leg pool of 0.995+ correlates is not the S6E8 regime.
+
+**Leaderboard context, for the §5 week-3 reassessment now eight days out.** The board grew
+**1,632 → 1,820 teams overnight** and compressed: rank 100 now needs 0.94645, rank 200 0.94641,
+rank 300 0.94635. We gained +0.00008 since yesterday and moved **369 → 395**, because the ~0.94644
+public-blend cluster keeps absorbing new entrants above us. This is §8's standing finding sharpening,
+not changing: rank is not measuring modelling in that band, and the gap to the *modelling* frontier
+(their best single model, ~0.94633) is ~0.00008, not the ~0.0002 the rank implies.
+
+**What stays open**, unchanged from Phase 16: whether a capacity between E1's 7 leaves and R0's 31
+gets the OOF without the ~0.00011 hyperparameter-family LB penalty. That is the one lead with a
+measured mechanism behind it and no probe run yet.
