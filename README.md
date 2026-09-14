@@ -1484,3 +1484,96 @@ not changing: rank is not measuring modelling in that band, and the gap to the *
 **What stays open**, unchanged from Phase 16: whether a capacity between E1's 7 leaves and R0's 31
 gets the OOF without the ~0.00011 hyperparameter-family LB penalty. That is the one lead with a
 measured mechanism behind it and no probe run yet.
+
+### Phase 17 — the offset was never hyperparameters; it is `fe_recipe_score` (2026-09-14)
+
+Phase 16 left one open lead: whether a capacity between E1's 7 leaves and R0's 31 gets R0's OOF
+without the ~0.00011-0.00019 "R0-family" LB offset first measured that day. Five slots spent
+today, all instrument points, isolating one variable at a time — and the lead was wrong in its
+premise. **The offset was never about hyperparameters. It is `fe_recipe_score`.**
+
+**Capacity, closed.** A clean sweep on the LW base (R1's lean 40-feature recipe with windows
+replacing the shape encoder), varying ONLY `num_leaves` and holding every other R0-family knob
+fixed:
+
+| leaves | OOF | Δ vs LW(31) |
+|---|---|---|
+| 7 | 0.946022 | +0.000020 |
+| 13 | 0.946018 | +0.000016 |
+| 19 | 0.946000 | −0.000002 |
+| 25 | 0.946006 | +0.000004 |
+| 31 *(LW)* | 0.946002 | — |
+
+Flat across the whole range — under the 0.000038 seed floor. `best_iter` compensates (7 leaves
+needs 2132-3426 rounds; 31 needs 930-1355) but OOF does not move. **LWcap7 submitted anyway**, as
+the sharpest available test of whether the offset itself tracked leaves even though OOF didn't:
+LB 0.94617, residual **−0.00016** — squarely the R0-family band. Capacity is not the driver.
+
+**max_bin and learning_rate, closed the same way.** `LWb255` (max_bin 1024→255): OOF 0.945988,
+flat (−0.000014), no `best_iter` change. `LWlr05` (lr 0.02→0.05): OOF 0.945958, and its
+`best_iter` collapses to 392-536 — an almost exact match to `LWE`'s full-five-knob collapse
+(358-536) from Phase 16. That looked like the smoking gun. Submitted: LB 0.94612, residual
+**−0.00014** — still the R0-family band, despite the mechanistic match. Three single-knob
+hyperparameter swaps, three failures to move the residual.
+
+**The pivot, and the actual answer.** Every "bad-band" run all along shared one thing every
+"good-band" run lacked: the `freq_cols`/`fe_recipe_score`/`te_multi_smooth` feature bundle,
+independent of which hyperparameters process it. Testing that directly, holding hyperparameters
+fixed at `W2`'s own E1 values (its own residual was the best measured all competition, −0.00001):
+
+| probe | added to W2 | OOF | Δ vs W2 | best_iter | LB | residual |
+|---|---|---|---|---|---|---|
+| W2 *(baseline)* | — | 0.945881 | — | normal | 0.94617 | **−0.00001** |
+| **W2TM** | `te_multi_smooth` only | 0.945902 | +0.000021 | normal (775-1151) | 0.94620 | **+0.00000** |
+| W2FB | freq_cols + recipe_score + multi-smooth | 0.945799 | −0.000082 | collapse (340-660) | 0.94595 | −0.00014 |
+| **W2RS** | `fe_recipe_score` **only** | 0.945721 | **−0.000160** | **collapse (288-555)** | **0.94587** | **−0.00013** |
+
+`te_multi_smooth` is innocent (W2TM lands dead on the good-band prediction). `fe_recipe_score`
+**alone** — two fixed-coefficient columns (`buy_score`/`worry_score`, the recovered ORIGIN
+generator's linear formula) — reproduces nearly all of W2FB's OOF loss and LB penalty by itself,
+with the sharpest `best_iter` collapse measured all day. This directly extends Phase 12's P3
+finding (displacement on E1's 16-feature baseline: −0.000144 OOF, `best_iter` 369-444) to this
+representation, and the collapse is *worse*, not better, after four days of encoder work:
+**the fixed composite score is still the cheapest thing in the feature set for a tree to grab
+early, and grabbing it costs resolving the fine per-value structure everything else this
+competition has built exists to supply.**
+
+**What this means for the champion, and why the premise was wrong from the start.** WQ (the
+current champion) *does* carry `fe_recipe_score=True`. Phase 15's own `Ia` probe already measured
+dropping it from R0 as a dead null on OOF (+0.000006) and explained why: R0's 154-feature
+representation has enough competing structure that `best_iter` (777-1098) was nowhere near
+collapse, so two extra composite columns don't measurably displace anything further there. That
+reasoning holds up: the mechanism is representation-size-dependent, not fixed. Whether it still
+holds for WQ specifically (172 features, windows+ladder added since R0) is checked directly below.
+
+**WQnoRS (offline, no slot spent): OOF 0.946084**, vs WQ's 0.946086 — a dead null (−0.000002),
+`best_iter` normal (983-1210, no collapse). Confirms Ia's finding holds at WQ's own scale: on the
+172-feature representation, `fe_recipe_score` displaces nothing, so today's mechanism does not
+touch the champion. **No free improvement is available, and none should be sought here** — the
+mechanism just closed explicitly requires displacement, which is not happening on this
+representation, so a future slot testing WQ-minus-recipe-score on the LB would almost certainly
+reproduce WQ's own −0.00016 residual with statistically the same OOF. Not worth spending on.
+
+**What stays open.** WQ's own −0.00016 LB residual is real (measured twice now: WQ itself and the
+8-leg stack both landed there) and still unexplained — today closed capacity, max_bin, learning
+rate, `te_multi_smooth`, and `fe_recipe_score` as candidates, all on representations where they
+*could* plausibly matter, and none of them touch it at WQ's actual feature count. The lead for a
+future session: isolate `freq_cols` and the window/ladder encoders themselves (untested alone,
+still confounded together in every rich-representation run to date) as the remaining candidates,
+or accept that the offset is a property of representation richness in some diffuse sense that a
+single-ingredient swap cannot isolate.
+
+**Five slots spent, four of them decisive isolations, in order:**
+
+| submission | probe | raw pred | actual LB | residual | verdict |
+|---|---|---|---|---|---|
+| 1 | LWcap7 (leaves→7) | 0.94633 | 0.94617 | −0.00016 | capacity: not the driver |
+| 2 | LWlr05 (lr→0.05) | 0.94626 | 0.94612 | −0.00014 | learning rate: not the driver |
+| 3 | W2FB (full bundle added) | 0.94609 | 0.94595 | −0.00014 | confirms the feature bundle carries it |
+| 4 | W2TM (multi-smooth only) | 0.94620 | 0.94620 | **+0.00000** | cleared |
+| 5 | W2RS (recipe_score only) | 0.94600 | 0.94587 | −0.00013 | **confirmed carrier** |
+
+No champion move — none of today's probes were built to beat WQ, and none accidentally did (best:
+LWcap7 at 0.94617, still below WQ's 0.94624). `experiments/runs.csv` carries all nine probe rows
+plus the offline WQnoRS check; `pool.json` is unchanged. Board re-read: 1,877 teams (up from 1,820
+yesterday), rank 409 at our unchanged 0.94625.
