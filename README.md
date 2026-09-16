@@ -1577,3 +1577,130 @@ No champion move — none of today's probes were built to beat WQ, and none acci
 LWcap7 at 0.94617, still below WQ's 0.94624). `experiments/runs.csv` carries all nine probe rows
 plus the offline WQnoRS check; `pool.json` is unchanged. Board re-read: 1,877 teams (up from 1,820
 yesterday), rank 409 at our unchanged 0.94625.
+
+### Phase 18 — the window encoder is saturated; feature bulk is dead; `fe_recipe_score` is a real LB cost (2026-09-16)
+
+Five slots, all spent, plus eight offline probes. **No OOF lever found — all seven new probes came
+back negative — and the champion still moved +0.00007 LB**, because the night's gains came from
+*removing* things rather than adding them. Board re-read: 2,036 teams (up from 1,877), top 0.94674,
+rank 100 at 0.94649, rank 300 at 0.94638. We stood at rank 445 on 0.94625.
+
+*(Zero submissions were made on 2026-09-15 UTC — five paired points thrown away, the exact miss
+playbook §1 exists to prevent. Recorded here because the log should show it.)*
+
+**1. `fe_recipe_score` costs real leaderboard score, and Phase 17's exemption of the champion was
+wrong.** Phase 17 identified the two fixed-coefficient composite columns as the carrier of the
+R0-family LB offset, then exempted `WQ` on the grounds that the displacement mechanism cannot operate
+at 172 features (`WQnoRS` was a dead null on OOF, +0.000002, `best_iter` uncollapsed) and declared a
+slot on it "not worth spending." That reasoning was about OOF; the question was about the residual.
+`WQnoRS` had been sitting archived and unsubmitted since Phase 17.
+
+| | feats | OOF | LB | residual |
+|---|---|---|---|---|
+| WQ *(rs on)* | 172 | 0.946086 | 0.94624 | −0.00016 |
+| **WQnoRS** *(rs off, strict twin)* | 170 | 0.946084 | **0.94629** | **−0.00011** |
+
+**+0.00005 LB at a −0.000002 OOF change** — 1.9σ of the near-twin paired resolution. Restricting to
+rich runs only (≥100 features), so feature count cannot explain the split: rs=True n=8 mean
+**−0.00018**, rs=False n=4 mean **−0.00007**, Welch **p = 0.016**. The paired single-field estimate
+(+0.00005) is the conservative one and the group difference (+0.00011) the upper bound; both say the
+same thing. **`fe_recipe_score` is struck from every recipe.** It was never worth anything on OOF at
+any feature count, and it costs on the board at every one.
+
+But the offset is **not fully explained by it** — rs removal recovers about a third of the −0.00016,
+leaving ~−0.00007 standing after six isolation attempts across Phases 16–18.
+
+**2. Feature bulk is refuted, on the cleanest test this competition has produced.** Phase 16 §3
+raised a feature-count effect (r = −0.727, p = 0.0004) and then abandoned it as a "false trail" on
+the W2-vs-LW pair — which was confounded by hyperparameters *and* `fe_recipe_score` simultaneously,
+so it never actually settled anything. Tonight's five submissions break both confounds: identical R0
+hyperparameters, `fe_recipe_score` off on every one, spanning 50 to 194 features.
+
+| run | feats | OOF | LB | residual |
+|---|---|---|---|---|
+| LWQnoRS | 50 | 0.946048 | 0.94630 | −0.00006 |
+| **WQ2** | **154** | 0.946080 | **0.94631** | −0.00008 |
+| WQnoRS | 170 | 0.946084 | 0.94629 | −0.00011 |
+| WR | 175 | 0.946080 | **0.94633** | −0.00006 |
+| WD | 194 | 0.946049 | **0.94633** | −0.00003 |
+
+**corr(n_features, residual) = +0.001** across a 144-feature span. Flat, and the sign of every
+sub-comparison is wrong for bulk. The sharpest single pair is **WQ2 vs WR: OOF matched to all six
+decimals (0.946080) at 154 vs 175 features** — the extra 21 features scored **+0.00002 higher**,
+against a bulk prediction of −0.00003. `LWQnoRS` landed at 0.94630 against a pre-registered 0.94629
+(refutation) vs 0.94636 (bulk). **The axis is closed.** What Phase 16 measured as a feature-count
+trend was `fe_recipe_score` riding along with feature count, exactly as Phase 17 suspected but could
+not confirm without a rich rs-free point.
+
+**3. The derivative hypothesis — the night's headline probe — is refuted, three times over.**
+Reading `apply_window_target_encoding` against the shape encoder it replaced: the shape encoder
+emitted eight channels per bin width *including* left, right, slope and curvature, and Phase 14 named
+those explicit derivative channels as a main mechanism ("hand the tree the response's local
+derivative"). Phase 16 promoted centred windows on the strength of fixing the grid's arbitrary
+*origin* — and silently dropped the derivative, since a symmetric rate per radius carries no
+asymmetry and **a tree cannot difference two columns**. That looked like the reason `WQ` still
+carried *both* encoders despite Phase 16 §1 declaring `te_shape_cols` superseded.
+
+New default-off axis `te_window_sides` (left/right/slope/curvature; one-sided windows exclude the
+query value, so they are strictly *more* leak-resistant than the centred rate; verified bit-identical
+on W2's archived config before use). Result, on three structurally different bases:
+
+| probe | base | feats | Δ OOF |
+|---|---|---|---|
+| W2D | lean, E1 params | 62 | −0.000043 |
+| WD | rich, R0 params | 194 | −0.000035 |
+| WDS | rich, shape dropped | 178 | −0.000041 |
+
+One answer, three bases, `best_iter` normal throughout (988–1494), so this is not displacement in the
+F1/H2/H3/P3 sense. **Phase 14's attribution of the shape encoder's gain to its slope/curvature
+channels does not survive re-parameterisation**: what the window encoder kept (correct centring) was
+the part that mattered, and what it dropped was not.
+
+**4. The window encoder is saturated on every parameter it has.** Seven probes, all negative, none
+near the +0.0000949 gate — against `WQnoRS` 0.946084:
+
+| probe | change | Δ OOF | feats |
+|---|---|---|---|
+| WQ2 | `te_shape_cols` dropped | −0.000004 | 154 |
+| WR | radii 6 → 11, [1…250] | −0.000004 | 175 |
+| WSM | `te_window_smooth` 10 → 2 | −0.000011 | 170 |
+| WC | `te_window_count` (occupancy) | −0.000017 | 176 |
+| WD | `te_window_sides` | −0.000035 | 194 |
+| WDS | sides + shape dropped | −0.000041 | 178 |
+
+**WSM is the informative null of the small ones.** Its exact-value analogue is the second-largest
+single-knob gain of this competition (C2, `te_smooth` 20 → 5, +0.000487), and it does not transfer: a
+window at radius 25+ already pools thousands of rows, so smoothing strength is near-irrelevant there,
+and the fine structure that made the per-value key sensitive is exactly what pooling has already
+averaged away.
+
+**5. A Phase 16 explanation, corrected.** Phase 15's X1 found the shape encoder flat from 1024 to
+16384 bins; Phase 16 explained that null away as the arbitrary-origin defect being shared by every
+setting tried, implying a correctly-centred encoder *would* show real sensitivity to its pooling
+scale. `WR` nearly doubles the radius ladder and widens both ends for **−0.000004**. A correctly
+centred encoder is flat in its radii too. **Neighbour-pooling granularity is flat in general — X1's
+null was a property of the pooling, not of the broken grid**, and Phase 16's account of it was wrong.
+
+**Champion moves: `WQ` (OOF 0.946086 → LB 0.94624) → `WQ2` (OOF 0.946080 → LB 0.94631), +0.00007 LB,
+rank ~445 → ~399.** `WQ2` is `WQ` with `fe_recipe_score` off and the redundant fixed-grid shape
+encoder dropped: **154 features against 172, at an OOF change of −0.000006 — one sixth of the seed
+floor.** Both removals, nothing added.
+
+**On not promoting WD or WR, which both scored 0.94633.** Tonight's five submissions span 0.00004 of
+LB, **1.5σ of the near-twin paired resolution — they are one score.** `WD`'s OOF is 0.000031 *below*
+`WQ2`'s, and `WR`'s matches it exactly while carrying 21 more features. The OOF is the trusted ranker
+(§4) and the repo's standing tiebreak between indistinguishable candidates is the simpler model
+(Phase 16b). Promoting `WD` would be reading a 1σ LB difference against a measured OOF deficit —
+precisely the over-read Phase 16 §5 is the post-mortem of. **`WQ2` ships.**
+
+**What stays open.** The residual ~−0.00007 that survives removing `fe_recipe_score`, now with
+capacity, `max_bin`, learning rate, `te_multi_smooth`, `fe_recipe_score` and feature bulk all measured
+closed as candidates. The encoder axis that produced every gain since Phase 14 is saturated in its
+parameterisation. `pool.json` still references `WQ` as its 8th leg and its `champion_stack_oof`
+(0.946127) predates tonight — the stack was not re-measured and that number is stale until it is. The
+§5 artifact-sharing reassessment is due **2026-09-21**, five days out.
+
+`experiments/runs.csv` rows `221f2964` (WQ2), `874fe751` (WR), `351fb556` (WD), `2f08d839` (LWQnoRS),
+`435587bd` (WSM), `5c2a97ca` (WC), `d7c3e9da` (WDS), `a51f88b2` (W2D); `f5c9efb0` carries WQnoRS's
+score — **`cc73801d` is its un-submitted duplicate, so de-duplicate on `run_tag` before any
+re-analysis.**

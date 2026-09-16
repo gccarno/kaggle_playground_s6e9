@@ -119,6 +119,12 @@ kaggle kernels status gcarno/s6e9-model
   In S6E8's final round, 10 of 17 probes cleared the solo gate and 0 cleared the stack gate.
 - **The gate stays unset in `README.md` §4 until the OOF↔LB residual σ has been measured** over
   ~10 paired runs. Do not invent one earlier, and do not re-derive it later from marginal LB deltas.
+- **`fe_recipe_score` is struck from every recipe (Phase 18).** The two fixed-coefficient
+  `buy_score`/`worry_score` columns are worth nothing on OOF at any feature count and cost real
+  LB at every one: rich rs=True runs average residual −0.00018, rich rs=False −0.00007 (Welch
+  p=0.016), and the paired single-field twin (WQ→WQnoRS) is +0.00005 LB at −0.000002 OOF.
+  Likewise `te_shape_cols` is superseded by `te_window_cols` and redundant on top of it — the
+  champion `WQ2` carries neither.
 - **Burn the daily submission slots.** 5/day, no rollover. Each spent slot is a paired OOF↔LB point,
   and the paired points are what make every offline decision trustworthy. S6E8 used 18 of a possible
   ~290 and paid for it by over-reading four of them.
