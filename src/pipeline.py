@@ -156,6 +156,19 @@ DEFAULTS = {
     "te_window_radii": [2, 5, 10, 25, 50, 200],
     "te_window_smooth": 10.0,
     "te_window_count": False,   # also emit log1p(window occupancy) per radius
+    # Also emit ONE-SIDED window rates and the derivative channels built from them:
+    # left [v-r, v), right (v, v+r], slope (right - left), curvature (centred -
+    # mean(left, right)). MECHANISM: te_shape_cols emitted eight channels per bin
+    # width INCLUDING left/right/slope/curvature, and Phase 14 named those explicit
+    # derivative channels as a main mechanism ("hand the tree the response's local
+    # derivative"). Phase 16 replaced the shape encoder with centred windows on the
+    # strength of fixing the grid's arbitrary ORIGIN -- and in doing so dropped the
+    # derivative, since a symmetric rate per radius carries no asymmetry and a tree
+    # cannot difference two columns. This restores it in the correctly-centred
+    # parameterisation. Same fold-only fit and inner-K-fold protection as the
+    # centred rate; the sides are strictly MORE protected, since a one-sided window
+    # excludes the query value itself.
+    "te_window_sides": False,
     # UNSUPERVISED quantisation ladder: floor(v / d) per divisor, the public frontier's
     # "smooth keys" (flagged untested at the end of Phase 15). Built in base_features, so
     # the resulting q_{col}_{d} columns can themselves be named in te_cols / freq_cols.
@@ -709,6 +722,37 @@ def _window_rates(v_fit, y_fit, v_query, radii, prior, smooth):
     return rates, counts
 
 
+def _window_side_rates(v_fit, y_fit, v_query, radii, prior, smooth):
+    """One-sided companion to _window_rates: the smoothed positive rate over fit rows in
+    [v-r, v) and in (v, v+r], per radius.
+
+    Same prefix-sum machinery, two extra searchsorted calls per radius to find where the
+    query value itself starts and ends in the sorted fit values, so the centre is excluded
+    from BOTH sides. That exclusion is why these channels are strictly more leak-resistant
+    than the centred rate: a one-sided window never contains the query row's own value at
+    all, let alone its own label.
+
+    Returns (left, right), each (len(v_query), len(radii)).
+    """
+    order = np.argsort(v_fit, kind="mergesort")
+    vs, ys = v_fit[order], y_fit[order].astype(np.float64)
+    cs_sum = np.r_[0.0, np.cumsum(ys)]
+    cs_cnt = np.arange(len(vs) + 1, dtype=np.float64)
+    # where the query value itself sits in the sorted fit values -- radius-independent
+    at_lo = np.searchsorted(vs, v_query, side="left")
+    at_hi = np.searchsorted(vs, v_query, side="right")
+    left = np.empty((len(v_query), len(radii)), dtype=np.float64)
+    right = np.empty_like(left)
+    for k, r in enumerate(radii):
+        lo = np.searchsorted(vs, v_query - r, side="left")
+        hi = np.searchsorted(vs, v_query + r, side="right")
+        sl, nl = cs_sum[at_lo] - cs_sum[lo], cs_cnt[at_lo] - cs_cnt[lo]
+        sr, nr = cs_sum[hi] - cs_sum[at_hi], cs_cnt[hi] - cs_cnt[at_hi]
+        left[:, k] = (sl + smooth * prior) / (nl + smooth)
+        right[:, k] = (sr + smooth * prior) / (nr + smooth)
+    return left, right
+
+
 def apply_window_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
     """SUPERVISED CENTRED-WINDOW target rates for a NUMERIC column, one column per
     radius in cfg["te_window_radii"], fit on the TRAINING FOLD ONLY.
@@ -735,6 +779,7 @@ def apply_window_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
     prior = float(ytr.mean())
     radii = list(cfg["te_window_radii"])
     smooth = float(cfg["te_window_smooth"])
+    sides = bool(cfg["te_window_sides"])
     new_cols = []
     for c in cols:
         v_tr = Xtr[c].to_numpy(np.float64)
@@ -744,20 +789,46 @@ def apply_window_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
 
         rate_tr = np.zeros((len(v_tr), len(radii)), dtype=np.float64)
         cnt_tr = np.zeros_like(rate_tr)
+        lf_tr = np.zeros_like(rate_tr)
+        rt_tr = np.zeros_like(rate_tr)
         inner = StratifiedKFold(cfg["te_inner_folds"], shuffle=True,
                                 random_state=rng_seed)
         for i, j in inner.split(v_tr.reshape(-1, 1), ytr):
             rate_tr[j], cnt_tr[j] = _window_rates(v_tr[i], ytr[i], v_tr[j], radii,
                                                   float(ytr[i].mean()), smooth)
+            if sides:
+                lf_tr[j], rt_tr[j] = _window_side_rates(v_tr[i], ytr[i], v_tr[j], radii,
+                                                        float(ytr[i].mean()), smooth)
         for k, nm in enumerate(names):
             Xtr[nm] = rate_tr[:, k]
 
-        out = {}
+        out, side = {}, {}
         for key, X, v in (("va", Xva, v_va), ("te", Xte, v_te)):
             out[key] = _window_rates(v_tr, ytr, v, radii, prior, smooth)
             for k, nm in enumerate(names):
                 X[nm] = out[key][0][:, k]
+            if sides:
+                side[key] = _window_side_rates(v_tr, ytr, v, radii, prior, smooth)
         new_cols += names
+
+        if sides:
+            # The derivative channels the shape encoder had and the centred window lost.
+            # slope = right - left is the response's local first difference at v; curvature
+            # = centred - mean(left, right) is its second. A tree cannot construct either
+            # from the symmetric rates alone, however many radii it is given.
+            for k, r in enumerate(radii):
+                for suf, tr_v, va_v, te_v in (
+                        ("L", lf_tr[:, k], side["va"][0][:, k], side["te"][0][:, k]),
+                        ("R", rt_tr[:, k], side["va"][1][:, k], side["te"][1][:, k]),
+                        ("slope", rt_tr[:, k] - lf_tr[:, k],
+                         side["va"][1][:, k] - side["va"][0][:, k],
+                         side["te"][1][:, k] - side["te"][0][:, k]),
+                        ("curv", rate_tr[:, k] - 0.5 * (lf_tr[:, k] + rt_tr[:, k]),
+                         out["va"][0][:, k] - 0.5 * (side["va"][0][:, k] + side["va"][1][:, k]),
+                         out["te"][0][:, k] - 0.5 * (side["te"][0][:, k] + side["te"][1][:, k]))):
+                    nm = f"tewin_{c}_r{r}_{suf}"
+                    Xtr[nm], Xva[nm], Xte[nm] = tr_v, va_v, te_v
+                    new_cols.append(nm)
 
         if cfg["te_window_count"]:
             # Window occupancy: how many training-fold rows the rate was built from, so
