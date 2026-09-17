@@ -82,6 +82,16 @@ post-mortem of exactly that mistake.
 | **OOF→LB residual σ** | **0.000103** | same fit; at the public split's own paired resolution, as it should be |
 | **SHIPPING GATE** | **+0.0000949 OOF** | = residual σ ÷ slope. **Replaces the interim +0.0001 placeholder**, which it confirms. |
 
+**Phase 19 correction to how this predictor is read, not to the gate.** The slope/intercept
+above were fit on 10 points spanning OOF 0.9417–0.9457. Every champion since Phase 14 sits
+at 0.9460–0.9461 — outside that calibration range — so using this line to predict an LB
+score up there is an extrapolation, not an interpolation. Phase 19 refit a second line on a
+matched OOF band and found the champion family's residual against it is inside 1.1σ; the
+≈−0.00007 residual Phases 16–18 chased was two separate, smaller mechanisms (a known
+`fe_recipe_score` cost and a newly-found TE-weakening cost), not a property of this fit being
+wrong. **The SHIPPING GATE itself does not change**: it is residual σ ÷ slope from this exact
+fit, frozen by design, and stays frozen. See Phase 19 (§8) for the full account.
+
 **The paired ΔAUC SD is a property of the PAIR, not of the split.** Measured 2026-09-04 and it
 changes how every LB comparison is read:
 
@@ -1704,3 +1714,145 @@ parameterisation. `pool.json` still references `WQ` as its 8th leg and its `cham
 `435587bd` (WSM), `5c2a97ca` (WC), `d7c3e9da` (WDS), `a51f88b2` (W2D); `f5c9efb0` carries WQnoRS's
 score — **`cc73801d` is its un-submitted duplicate, so de-duplicate on `run_tag` before any
 re-analysis.**
+
+### Phase 19 -- the residual decomposes into three mechanisms, one of them new (2026-09-16/17)
+
+Phase 18 closed with one open item: a ~-0.00007 LB residual surviving fe_recipe_score
+removal, unexplained after six isolation attempts across Phases 16-18. Before touching code,
+re-reading README section 4 itself found the more basic problem: the frozen OOF->LB fit (slope
+1.0832, residual sigma 0.000103) was estimated in Phase 3 on 10 points spanning OOF 0.9417-0.9457.
+Every run since Phase 14 sits at 0.9460-0.9461, outside that calibration range -- and 14 of the
+most recent submissions sit within 0.0001 of each other on OOF, so no regression fit to them can
+estimate a local slope; it can only extrapolate. Playbook section 5 exists for exactly this
+shape of mistake: a series of LB points read as a trend when its range is smaller than the
+split's own resolution.
+
+So today bought what the champion's own neighbourhood never had: OOF spread. Five slots, spent
+on a deliberately-degraded ladder built on WQ2's own 154-feature config, submitted in descending
+OOF order, each pre-registered under both the frozen fit and a same-day refit before its LB score
+was known (experiments/runs.csv notes carry the numbers verbatim, written before submission).
+
+**Zero-slot work first, all local/offline:**
+
+- scripts/refit_gap.py (new): refits the OOF->LB predictor three ways from the archived run
+  log -- the frozen 10-point selection (reproduces slope 1.0832, sigma 0.000103 exactly, confirming
+  README section 4's own arithmetic), all 45 then-archived points (slope 1.0496, sigma 0.000080),
+  and the rich cluster alone (slope 0.8354 off only 20 points spanning 0.0002 OOF -- noise, not a
+  measurement, which is the plan's whole thesis stated in code).
+- scripts/public_gap.py, run for the first time in S6E9. Its named library
+  (szymonkapiski/s6e9-oof-library-47-models) now 403s; substituted
+  dariushafshar/s6e9-golem-oof-library (19 members, OOF 0.9381-0.9445, all below our pool floor --
+  a diversity library, not a state-of-the-art one). It ships folds_seed42.npy, which the script
+  now verifies bit-identical to our frozen split (668,665/668,665 rows) before trusting anything --
+  a real check the original szymonkapiski plan could never offer. Result: our 8-leg pool (WQ
+  swapped for its rs-free successor WQ2; pool.json updated) contributes +0.001424 to a
+  union stack over this library, and the niche we're missing from it is +0.000023 -- under the
+  seed floor. This library adds nothing; it says nothing about the actual ~0.9467 frontier, which
+  it does not contain.
+- pool.json refreshed: 8th leg WQ -> WQ2, champion_stack_oof recomputed 0.946136 (was
+  0.946127, stale since before Phase 18).
+- Six ladder rungs screened on Kaggle CPU kernels (5-concurrent cap), zero LB spent. A real
+  harness bug caught here, not on a submission: the first TS100/TS1000 attempts (te_smooth
+  5->100/1000) landed bit-identical to WQ2 -- pipeline.py's own comment says te_smooth is
+  ignored for te_cols whenever te_multi_smooth is non-empty, and WQ2 carries
+  te_multi_smooth=[10,"auto"]. Both were silent no-ops. Corrected (TS100b/TS1000b: override
+  te_multi_smooth itself) before either reached a submission.
+
+**The ladder, OOF only (screened, no LB yet at this point):**
+
+| rung | change from WQ2 | OOF | delta vs WQ2 (0.946080) |
+|---|---|---|---|
+| FQ | freq_cols/freq_digit_cols dropped | 0.946101 | +0.000021 -- near-twin, closes Phase 18's last open lead |
+| TS100b | te_multi_smooth -> [100] | 0.945951 | -0.000129 |
+| TS1000b | te_multi_smooth -> [1000] | 0.945909 | -0.000171 |
+| NOTE | te_cols emptied (per-value TE dropped) | 0.945859 | -0.000221 |
+| NE300 | n_estimators 3500->300, early stop off | 0.945406 | -0.000674 |
+| BARE | te_cols/te_window_cols/fe_quant_cols all emptied | 0.944209 | -0.001871 |
+| NE120 | n_estimators 3500->120, early stop off | 0.941051 | -0.005029 |
+
+**The five submitted (descending OOF): TS100b -> NOTE -> NE300 -> BARE -> NE120.**
+
+| rung | OOF | frozen pred | refit pred | actual LB | resid vs frozen | resid vs refit |
+|---|---|---|---|---|---|---|
+| TS100b | 0.945951 | 0.94623 | 0.94613 | 0.94605 | -0.00018 | -0.00008 |
+| NOTE | 0.945859 | 0.94613 | 0.94603 | 0.94591 | -0.00022 | -0.00012 |
+| NE300 | 0.945406 | 0.94564 | 0.94556 | 0.94561 | -0.00003 | +0.00005 |
+| BARE | 0.944209 | 0.94435 | 0.94430 | 0.94430 | -0.00005 | 0.00000 |
+| NE120 | 0.941051 | 0.94093 | 0.94099 | 0.94127 | +0.00034 | +0.00028 |
+
+**Neither pre-registered outcome won outright.** The refit (1.0496) tracks better at the low end
+(BARE dead on, NE300 within 1 sigma) but NE120 misses both fits by 4x the fit's own residual sigma, in
+the opposite direction from TS100b/NOTE. A single local slope cannot be the answer when the
+residual's sign flips depending on which rung produced it.
+
+**Fitting the two historical eras separately resolves this.** The Phase 0-3 lean cluster (<=21
+features, n=15, the frozen fit's own era) refits to slope 1.0898, sigma 0.000083 -- matching the
+frozen fit closely, as it should. Reading every rung and every WQ2-family anchor against that
+line, grouped by mechanism, rather than feature count:
+
+| group | tags | resid vs lean line | paired sigma (this pair) |
+|---|---|---|---|
+| champion family (full TE, rs off) | WQ2 -0.00006, WR -0.00004, WD -0.00001, WQnoRS -0.00009, LWQnoRS -0.00004 | all <=1.1 sigma | -- |
+| fe_recipe_score on (known cost, Phase 18) | R0 -0.00013, WQ -0.00014, W1 -0.00015, LW -0.00014, LWcap7 -0.00014 | ~1.6-1.8 sigma | -- |
+| TE weakened, not removed (new) | TS100b -0.00018, NOTE -0.00022 | 2.2 sigma, 2.7 sigma | WQ2 vs NOTE: 0.000097 (public split) |
+| TE fully removed / fit mildly truncated | BARE -0.00003, NE300 -0.00003 | ~0.4 sigma | -- |
+| fit severely truncated (new) | NE120 +0.00038 | 4.6 sigma, opposite sign | WQ2 vs NE120: 0.000363 (public split) |
+
+**Three mechanisms, not one, and Phase 16-18 were hunting a single flat offset that was never
+there:**
+
+1. **fe_recipe_score costs LB** -- already found (Phase 18), independently reproduced here by a
+   completely different route (residual against a historical calibration line rather than a
+   paired ablation). Confirms Phase 18 rather than adding to it.
+2. **New: a per-value TE that is weakened but still present costs MORE than either the full-
+   strength version or no TE at all.** BARE (TE gone entirely) sits on the lean line; the
+   champion family (TE at full strength) sits on the lean line; NOTE/TS100b (TE present but
+   degraded) sit 2-3 sigma below it -- the worst residuals of any non-fe_recipe_score group. This
+   is a non-monotonic effect in encoder strength, structurally the same shape as the F1/H2/H3/P3
+   displacement signature (README section 6, Phase 2c): a partially-resolved lookup is something
+   the tree leans on with more confidence than it should, in a way a fully-resolved or fully-absent
+   lookup does not produce.
+3. **New: severely truncating boosting rounds inflates the LB relative to OOF, not the reverse.**
+   NE120 (120 rounds, no early stopping) scores +0.00038 above what its own OOF predicts -- the
+   Phase 3/4 fold-averaging mechanism (an OOF row is scored by one fold-model; a test row is the
+   5-fold average), previously established only for early-stopped neural nets (G1: +0.00105 raw,
+   +0.00048 after in-fold bagging), now demonstrated for the first time in a GBDT whose capacity
+   was cut hard enough to make it genuinely high-variance. NE300 (300 rounds -- less severe) shows
+   only a trace of the same effect, consistent with the mechanism being magnitude-dependent: the
+   variance cut from 5-fold test-averaging only matters once the underlying fold-model is
+   high-variance to begin with. The champion's own ~1000-1400-round early-stopped fit is far from
+   this regime -- this finding does not suggest the champion's OOF is currently mismeasured, only
+   that the ladder rungs built to probe the low end crossed into a regime where a different,
+   previously-neural-net-only bias applies.
+
+**What this means for the champion, stated plainly.** WQ2 and its rs-free siblings show a
+residual against the historical calibration line of -0.00001 to -0.00009 -- all within 1.1 sigma of
+the lean-era fit's own 0.000083 residual sigma. Phase 18's "~-0.00007 unexplained residual" is, once
+fe_recipe_score's already-known cost and the newly-found TE-weakening effect are separated out,
+not present for the actual champion. It was Phase 16-18 conflating the champion's own
+near-zero residual with the larger residuals of related-but-different configs (R0, WQ, LW,
+LWcap7) that still carried fe_recipe_score or the pre-WQ2 recipe -- plus, at the session's
+start, a fit extrapolated 0.004 past its own calibration range. The residual hunt that ran
+through three phases is retired: there was no single thing left to find, because there was never
+one mechanism producing it.
+
+**The shipping gate does not move.** README section 4 freezes it at +0.0000949 OOF, derived once
+and not re-derived from marginal deltas -- that stands exactly as written. What changes is the
+predictor (the OOF->LB relationship itself), which was always a diagnostic reading, never the
+gate's basis. The two are different objects; conflating them is the mistake this phase exists to
+correct.
+
+**No champion move.** All five slots went to instrument work by design (this phase's brief);
+WQ2 (OOF 0.946080 -> LB 0.94631) still ships. Two things are now queued for the next session,
+neither actioned tonight: the parked 5-leg rs-free blend (WQ2+WR+WD+WQnoRS+LWQnoRS,
+logit-mean OOF 0.946136, computed via stack_logit.py, near-equal fitted weights 0.199-0.203
+confirming the near-twin/fixed-combiner read) -- its predicted LB now has a properly local
+calibration to check against; and whether the TE-weakening effect (mechanism 2) has a real,
+untested optimum distinct from the OOF optimum, which the ladder was not built to resolve.
+
+Board re-read before the first slot: 2,132 teams (up from 2,036), top 0.94674, we stood at
+rank 410 on our best-of 0.94633. experiments/runs.csv rows: 5794995c (FQ), e882223f
+(TS100, broken/no-op -- superseded by 1b01b99a TS100b), `d52cd631` (TS1000, same defect --
+superseded by TS1000b), ad825508 (NOTE), 260eae35 (NE300), cb4fd044 (BARE), 1b01b99a (TS100b),
+`31e2d10a` (TS1000b), `adb8cfde` (NE120), de07aba9 (8-leg stack re-fit). pool.json updated in this
+phase (WQ -> WQ2, champion_stack_oof 0.946136). 92f79e80 is an unsubmitted duplicate of FQ (5794995c carries the real record) -- the same class of bug as Phase 18's `cc73801d`/WQnoRS pair, from an improperly-backgrounded push that archived once on its own before a correctly-tracked retry archived the same kernel a second time. De-duplicate on run_tag before any re-analysis; scripts/refit_gap.py excludes it by run_id already.

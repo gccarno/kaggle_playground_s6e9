@@ -9,6 +9,8 @@ __pycache__/
 experiments/preds/
 experiments/blends/
 experiments/singles/
+# downloaded public OOF library (scripts/public_gap.py), ~123 MB, re-fetchable via kaggle datasets download
+experiments/public_lib/
 # auto-submit queue state + logs
 experiments/queue.json
 experiments/submit_log.csv
