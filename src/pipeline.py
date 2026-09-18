@@ -174,6 +174,11 @@ DEFAULTS = {
     # the resulting q_{col}_{d} columns can themselves be named in te_cols / freq_cols.
     "fe_quant_cols": [],
     "fe_quant_divisors": [10, 50, 500, 5000],
+    # Per-column override of fe_quant_divisors. The global ladder is tuned for
+    # Annual_Income_USD (30000-188549, so 10/50/500/5000 give 5933/2026/284/32 levels);
+    # the same divisors on Daily_Commute_km (5.0-98.7) give 10/2/1/1 -- three constant
+    # columns. Default {} leaves every archived config bit-identical.
+    "fe_quant_divisors_by_col": {},
     "te_cols": [],                   # SUPERVISED per-value target encoding (fold-fit)
     "te_smooth": 20.0,               # additive smoothing toward the backoff target
     # When non-empty, emit ONE TE COLUMN PER SMOOTHING VALUE instead of a single te_smooth
@@ -359,8 +364,9 @@ def base_features(train, test, cfg):
         # and the magnitude, just at a coarser resolution, and -- because it is computed
         # here rather than inside the fold -- it can be named in te_cols/freq_cols like
         # any other column. Safe to compute once over train union test: no target read.
+        by_col = cfg.get("fe_quant_divisors_by_col") or {}
         for c in cfg["fe_quant_cols"]:
-            for d in cfg["fe_quant_divisors"]:
+            for d in by_col.get(c, cfg["fe_quant_divisors"]):
                 name = f"q_{c}_{d}"
                 tr[name] = np.floor_divide(tr[c].to_numpy(np.float64), float(d))
                 te[name] = np.floor_divide(te[c].to_numpy(np.float64), float(d))
