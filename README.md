@@ -1856,3 +1856,128 @@ rank 410 on our best-of 0.94633. experiments/runs.csv rows: 5794995c (FQ), e8822
 superseded by TS1000b), ad825508 (NOTE), 260eae35 (NE300), cb4fd044 (BARE), 1b01b99a (TS100b),
 `31e2d10a` (TS1000b), `adb8cfde` (NE120), de07aba9 (8-leg stack re-fit). pool.json updated in this
 phase (WQ -> WQ2, champion_stack_oof 0.946136). 92f79e80 is an unsubmitted duplicate of FQ (5794995c carries the real record) -- the same class of bug as Phase 18's `cc73801d`/WQnoRS pair, from an improperly-backgrounded push that archived once on its own before a correctly-tracked retry archived the same kernel a second time. De-duplicate on run_tag before any re-analysis; scripts/refit_gap.py excludes it by run_id already.
+
+### Phase 20 -- FQ and a never-run TE-coverage lead both beat WQ2; new champion, +0.00004 LB (2026-09-17/18)
+
+Board re-read before the first slot: 2,252 teams (up from 2,132), top **0.94675**, we stood at rank
+439 on our best-of 0.94633. Phase 19 closed with two artifacts parked, unsubmitted, at higher OOF
+than the champion (`FQ` 0.946101, the 5-leg rs-free blend 0.946136 fitted / 0.946121 as an honest
+equal-weight mean) and two Phase 15 X4 leads never run (TE key coverage; smooth keys as native
+categoricals). Tonight closed all four with five slots, all spent.
+
+**Zero-slot work first.** `scripts/refit_gap.py` reproduced the lean-era line exactly (slope
+1.0898, intercept -0.08470, sigma 0.000083 -- matches Phase 19's own fit to the last digit) and
+also fit the full 45-point de-duplicated set (slope 1.0248, intercept -0.02326, sigma 0.000085),
+now spanning OOF 0.9410-0.9461 thanks to Phase 19's ladder -- an interpolating fit for the first
+time since the champion moved past the frozen fit's calibration range. `scripts/stack_logit.py
+--mode logit_mean` recomputed Phase 19's parked blend as an honest equal-weight mean (not the
+fitted combiner): B5 (the parked 5 legs) 0.946121, not 0.946136 -- the 0.000015 gap is exactly the
+meta-model optimism the script's own docstring names, confirmed again by the fitted weights coming
+back at 0.199-0.203 (Phase 2's discriminator: a pool of near-twins gets averaged, not fitted).
+Adding `FQ` as a sixth leg (B6) raised it to 0.946130, the best blend found. One contained infra
+addition: `fe_quant_divisors_by_col`, a per-column override of the quantisation-ladder divisors
+(default `{}`), needed because the global `[10,50,500,5000]` ladder degenerates on
+`Daily_Commute_km` (5.0-98.7) to 10/2/1/1 levels, the last two constant. **Verified bit-identical**
+by re-running `FQ`'s exact archived config against the patched pipeline before trusting anything
+built on it: OOF 0.946101 and all five fold AUCs/best_iters reproduced exactly -- the check that
+would have caught Phase 19's `te_smooth` no-op before it reached a submission.
+
+**Five kernels fanned out on Kaggle CPU (the 5-concurrent cap), all built on `FQ`'s 93-feature
+base, screened free before any slot was spent:**
+
+| probe | change | feats | OOF | Delta vs FQ (0.946101) |
+|---|---|---|---|---|
+| **TEX** | commute quantisation ladder (`[1,2,5,10]`) added to `te_cols` | 105 | **0.946122** | **+0.000021** |
+| SKa | `q_Annual_Income_USD_5000` (32 lvl) as native categorical | 94 | 0.946097 | -0.000004 |
+| TS2 | `te_multi_smooth` strengthened to `[2,10,"auto"]` | 100 | 0.946063 | -0.000038 |
+| SKb | `q_Annual_Income_USD_500` (284 lvl) as native categorical | 94 | 0.946023 | -0.000078 |
+| SKc | `q_Annual_Income_USD_50` (2,026 lvl) as native categorical | 94 | 0.945759 | -0.000342 |
+
+**The SK ladder closes the categorical-identity axis cleanly.** A smooth monotone decline with
+cardinality (32 lvl null, 284 lvl -0.000078, 2,026 lvl -0.000342), not a cliff, and `best_iter`
+normal throughout (SKc: 823/1154/988/...) -- this is information loss, not the F1/H2/H3/P3
+displacement signature. Consistent with Phase 1c's structural finding that the per-value lookup is
+already fully extracted (residual variance ratios 0.68-0.88): handing the same value identity to a
+second, coarser mechanism only degrades the split search, it recovers nothing the TE missed.
+
+**Five slots, submitted in this order, each pre-registered in `experiments/runs.csv` before
+submission:**
+
+| slot | run | OOF | predicted LB | actual LB | read |
+|---|---|---|---|---|---|
+| 1 | `FQ` (`5794995c`) | 0.946101 | 0.94635 | **0.94627** | misses prediction by 0.00008; does NOT clear the fewer-features tiebreak against WQ2 (0.94631) |
+| 2 | `B6` blend (`26ed552b`) | 0.946130 | 0.94638 (no penalty) / ~0.94626 (7-leg rate) | **0.94633** | between the two, 0.00001 short of the promotion gate; beats FQ but not TEX |
+| 3 | `TEX` (`43db301d`) | 0.946122 | 0.94637 | **0.94635** | clears WQ2 (0.94631) outright, at 105 feats vs 154 |
+| 4 | `SKc` (`ec6afd42`) | 0.945759 | 0.94600 | **0.94598** | within 0.00002 of prediction -- confirms the axis-closing read |
+| 5 | `TS2` (`67c48e45`) | 0.946063 | 0.94631-0.94632 | **0.94628** | ~0.00003-0.00004 below prediction -- a soft miss, not the 2-3 sigma NOTE/TS100b signature |
+
+**New champion: `TEX`, OOF 0.946122 -> LB 0.94635, at 105 features against `WQ2`'s 154.** This
+promotion does not rely on a tiebreak or a prediction: TEX beats WQ2 on OOF (+0.000042), on feature
+count (105 vs 154), and on the actual, submitted LB score (0.94635 vs 0.94631) -- three independent
+readings agreeing, the strongest promotion basis this repo has produced since Phase 14. Phase 15
+X4's "TE key coverage" lead, named and left untested for five phases, is real: the frontier's wider
+key coverage was never about the encoder's parameterisation (Phase 16-18 exhausted that), it was
+about which columns get a per-value key at all. Rank 439 -> **405** at 0.94635 (2,252 teams).
+
+**`FQ` itself was a false lead, and the mechanism is now visible in hindsight.** Its higher OOF
+than WQ2 (+0.000021) came entirely from *removing* `freq_cols`/`freq_digit_cols`, exactly the class
+of move that worked twice in Phase 18 (`fe_recipe_score`, the shape encoder) -- but FQ's actual LB
+residual against the all-points line is -0.00008, a real miss, not a null. Removing the frequency
+blocks costs something on the board that the OOF ladder cannot see, distinct from and larger than
+any mechanism identified so far. **Not chased further tonight** -- TEX (built on the same FQ base,
+plus the commute ladder) inherits whatever FQ's residual is and still cleared WQ2 comfortably, so
+the missing frequency blocks are not a blocking cost, but the FQ-alone result is flagged as an open
+question for a future session rather than folded into an existing mechanism it may not belong to.
+
+**The blend result is a genuine wash, read against Phase 14/16b's stack penalty.** B6's equal-
+weight logit mean scored 0.94633, almost exactly WQ2's own 0.94631 and a hair below TEX's 0.94635,
+despite carrying the highest OOF of the night (0.946130). This does not distinguish the two
+pre-registered outcomes cleanly -- it sits between "no penalty" (0.94638) and "7-leg fitted rate"
+(~0.94626) -- but it leans toward *some* dilution surviving even a fixed-weight mean over legs from
+one representation, since the winning single leg (TEX, discovered only after B6 was already
+computed and submitted) beats the six-leg average of legs that do not include it. The honest
+reading: a mean over near-twins is not free, it is merely cheaper than a fitted stack, matching
+Phase 2's discriminator directionally but not proving the penalty is zero.
+
+**`SKc`'s LB landing within 0.00002 of its predicted 0.94600 is the cleanest confirmation of an
+axis-closing read this competition has produced** -- a -0.000342 OOF cost with normal `best_iter`
+predicted to land exactly on the calibration line if it were pure information loss, and it did.
+Categorical identity keys are closed for good: the per-value TE already extracts what they carry,
+and coarsening the key only removes information the finer encoding kept.
+
+**`TS2`'s soft miss (~0.00003-0.00004 below its 0.94631-0.94632 prediction) does not cleanly
+confirm mechanism 2's directional claim, but does not refute it either.** It is well inside the
+near-twin/family residual band (~0.00003-0.00004), nowhere near NOTE/TS100b's 2.2-2.7 sigma misses
+on the weakening side. **Read together with FQ's own -0.00008 residual on the same all-points
+line, a pattern worth naming for a future session: three of tonight's five slots (FQ, B6, TS2) all
+landed 0.00001-0.00008 below their predictions, while only TEX and SKc landed on or above.** This
+could be the all-points line's own residual sigma (0.000085) doing what residual sigma does, or a
+real small negative bias in tonight's specific ladder -- one night is not enough data to tell them
+apart, and the next session should read new points against this line before assuming either.
+
+**A duplicate-archive artifact, same class as Phase 18's `cc73801d`/`WQnoRS` and Phase 19's own
+`92f79e80`/`FQ`.** An early attempt to background the TEX kernel poll used a shell-level `&`/
+`disown` that fought the harness's own background-process tracking; the orphaned process finished
+and archived on its own (`dad8253f`) before a correctly-tracked `--no-push` retry archived the
+identical kernel a second time (`43db301d`, the run actually passed to `submit_run.py`). Both rows
+carry identical OOF/LB (0.946122 / 0.94635) since they are the same kernel output. **De-duplicate
+on `run_tag=TEX`, keeping `43db301d`, before any re-analysis.**
+
+**Pool and champion updated.** `pool.json`: 8th leg `WQ2` -> `TEX` (`43db301d`); the 8-leg curated
+stack refit (fit-only, `b5a318cf`, no slot spent) to honest OOF **0.946178**, +0.000282 over the
+new equal-weight champion, with TEX taking the largest fitted weight (1.919) of any leg in the
+pool's history -- a strong single-leg signal, not stack-inflation, since a lone dominant weight is
+the opposite of what a redundant-legs stack produces. `champion_stack_oof` updated to 0.946178.
+This stack has **not** been submitted -- it is a fit-only measurement, exactly like Phase 19's
+`de07aba9` re-fit, and stays that way until a slot is deliberately spent on testing whether TEX's
+fitted-stack ADD survives contact with the LB the way its solo promotion just did.
+
+**What stays open for next session.** (1) FQ's -0.00008 residual, unexplained and not yet folded
+into an existing mechanism. (2) Whether the fixed-weight blend penalty is real or a one-night
+artifact (B6's inconclusive wash). (3) Whether extending TEX's commute-ladder idea to `Age` (a TEX2
+probe, never run, config-only) recovers more of the frontier's ~61-key coverage advantage --
+plausible given TEX's strength was real and the axis was only tested on one of three strong-driver
+columns. (4) The fitted 8-leg TEX stack (0.946178 OOF) is unsubmitted and untested against the ADD
+gate. `experiments/runs.csv` rows: `5794995c` (FQ), `26ed552b` (B6 blend), `43db301d`/`dad8253f`
+(TEX, duplicate pair), `d7121f80` (SKa), `d38d5c54` (SKb), `ec6afd42` (SKc), `67c48e45` (TS2),
+`9bbe0c46` (B5 mean), `a03e61c6` (B5f), `b5a318cf` (8-leg TEX stack re-fit, unsubmitted).
