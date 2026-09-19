@@ -72,7 +72,7 @@ def load_points():
         pts.append({
             "run_id": r["run_id"], "run_tag": r["run_tag"],
             "oof": float(r["final_oof_auc"]), "lb": float(r["public_lb_score"]),
-            "n_feat": int(r["n_features"] or 0),
+            "n_feat": int(float(r["n_features"] or 0)),
         })
     return pts
 
