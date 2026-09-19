@@ -1981,3 +1981,112 @@ columns. (4) The fitted 8-leg TEX stack (0.946178 OOF) is unsubmitted and untest
 gate. `experiments/runs.csv` rows: `5794995c` (FQ), `26ed552b` (B6 blend), `43db301d`/`dad8253f`
 (TEX, duplicate pair), `d7121f80` (SKa), `d38d5c54` (SKb), `ec6afd42` (SKc), `67c48e45` (TS2),
 `9bbe0c46` (B5 mean), `a03e61c6` (B5f), `b5a318cf` (8-leg TEX stack re-fit, unsubmitted).
+
+### Phase 21 -- coverage generalization closes, the stack washes a fourth time, and the calibration line was the noisy instrument (2026-09-19)
+
+Board re-read before the first slot: 2,336 teams (up from 2,252), top **0.94675**, we stood at
+rank 437 on our best-of 0.94635 (TEX). Five wave-1 probes screened free on Kaggle CPU tested
+whether TEX's win -- widening TE key COVERAGE, specifically giving `Daily_Commute_km` a
+quantisation ladder -- generalizes to other columns and encoders. **It does not.** All five slots
+were spent regardless, per the standing "burn the slots" rule, both to close the open leads
+decisively and to buy paired points for the calibration-line question Phase 20 flagged.
+
+**Zero-slot work first.** `scripts/refit_gap.py` crashed on a legacy row storing `n_features` as
+`"13.0"` -- fixed (`int(float(...))`), committed, harmless to every prior result since it only
+affects parsing. Refit before tonight's points (55 archived pairs): all-points fit slope 1.0227,
+intercept -0.02131, sigma 0.000100; rich-subset fit (OOF>=0.9459, n=24) slope 0.9974, intercept
+0.00262, sigma 0.000061.
+
+**Wave 1, all five strict twins of TEX (105 feats, OOF 0.946122), screened on Kaggle CPU before
+any slot was spent:**
+
+| probe | change | feats | OOF | delta vs TEX | best_iter |
+|---|---|---|---|---|---|
+| TEX2 | Age quantisation ladder ([2,5,10]) added to te_cols | 114 | 0.946109 | -0.000013 | normal (1119-1445) |
+| TXWC | window encoder extended income -> income+commute | 111 | 0.946111 | -0.000011 | normal (1022-1472) |
+| TXWA | window encoder extended income -> income+age | 111 | 0.946099 | -0.000023 | normal (1098-1505) |
+| TEXC | per-value TE added for the 4 columns with no key at all | 113 | 0.946101 | -0.000021 | normal (844-1600) |
+| TEXF | WQ2's freq_cols/freq_digit_cols blocks restored | 166 | 0.946125 | +0.000003 | normal (1037-1506) |
+
+**The coverage-generalization hypothesis is refuted, cleanly.** TEX's own commute-ladder win
+(Phase 20, +0.000021 OOF) does not repeat for Age via either the ladder (TEX2) or the window
+encoder (TXWA), does not repeat for commute via the window encoder (TXWC, redundant with the
+ladder that already works there), and does not repeat for the four still-uncovered low-cardinality
+columns (TEXC, -0.000021 -- the same magnitude as Phase 1c's C7 on the 16-feature E1 base,
+-0.000075, now independently reproduced on a representation four generations removed from it).
+Every one of the four sits inside or barely outside the 0.000038 seed floor, `best_iter` normal
+throughout -- these are information nulls, not the F1/H2/H3/P3 displacement signature. **The
+commute ladder was a real, specific finding about that one column, not a template.** TEXF landed
+flat on OOF as its own mechanism predicts (freq_cols are unsupervised value-count features,
+historically near-null on OOF alone).
+
+**Five slots, submitted in this order, each pre-registered in `experiments/runs.csv` before
+submission:**
+
+| slot | run | OOF | LB | vs TEX (0.94635) | read |
+|---|---|---|---|---|---|
+| 1 | 8-leg fitted stack (`b5a318cf`, OOF 0.946178) | 0.946178 | **0.94634** | -0.00001 | washes -- 4th confirmation of the stack-penalty pattern |
+| 2 | TEXF | 0.946125 | **0.94637** | +0.00002 | inside near-twin resolution (0.000027); see below |
+| 3 | TEX2 | 0.946109 | 0.94635 | +0.00000 | ties, despite -0.000013 OOF -- closes the Age-ladder lead |
+| 4 | TXWA | 0.946099 | 0.94636 | +0.00001 | ties, despite -0.000023 OOF (the WORST OOF of the five, a top-2 LB) |
+| 5 | TEXC | 0.946101 | 0.94635 | +0.00000 | ties -- closes the low-cardinality coverage lead |
+
+**Tonight's five LB scores span 0.00003 -- inside the near-twin paired resolution (0.000027).
+They are one score, not five, exactly as playbook section 5 warns.** The clearest illustration:
+TXWA has the LOWEST OOF of the batch (0.946099, -0.000023 vs TEX) and a top-2 LB (0.94636); the
+8-leg stack has the HIGHEST OOF (0.946178, the best recorded all competition) and the LOWEST LB
+of the six (0.94634). **No ranking can be read across this batch** -- the OOF differences being
+probed (all within ~0.00003 of each other and of TEX) are simply below this instrument's
+resolution floor, and the correct reading is "one score", not "TXWA's window encoder beats
+TEXC's TE" or any other pairwise story.
+
+**The stack's fourth wash is the cleanest result of the night.** 0.946178 OOF -> 0.94634 LB,
+essentially tied with TEX solo (0.94635) and clearly below the raw-fit prediction (~0.94635).
+This is the same pattern as Phase 15's 9-leg inversion, Phase 16b's 8-leg WQ-pool wash, and now a
+third pool generation's 8-leg TEX-anchored stack -- three different champion families, the same
+verdict. **Phase 20's open lead (4) closes: the fitted stack does not beat its own best leg on the
+board**, however high its OOF climbs. `champion_stack_oof` (0.946178) is now a verified, submitted
+number rather than a projected one, and it stays unshipped.
+
+**The calibration-line question Phase 20 raised is resolved, and the answer is that the "bias" was
+mostly the fit's own noise.** Phase 20 flagged three of its five slots (FQ, the B6 blend, TS2)
+landing 0.00001-0.00008 BELOW their predicted LB and deferred the question of whether that was a
+real negative bias or the line's own sigma. Re-reading those same five points against tonight's
+fully-refit 60-point line (slope 1.0241, intercept -0.02263, sigma 0.000097) instead of the
+smaller, staler fit available at the time:
+
+| group | mean residual (refit line) | sign count (of 5) |
+|---|---|---|
+| Phase 20's 5 points, re-read | **+0.00004** | 1 negative / 5 |
+| Phase 21's 5 points | **+0.00006** | 1 negative / 5 |
+
+**Both nights land close to on-line, mildly positive if anything -- the opposite of what the
+smaller fit made Phase 20's points look like.** FQ's own residual moved from the -0.00008 Phase 20
+read to -0.00000 against the refreshed fit. This is in-sample shrinkage doing exactly what it
+should: a regression fit on few, clustered, recent points reads its own noise as a trend, and
+adding more data erases most of it. **There is no persistent negative bias.** This also means
+Phase 20's headline finding that fe_recipe_score-free freq removal (FQ) cost real LB is weaker
+than it looked -- against the better-calibrated line the cost is close to zero, not a confirmed
+-0.00008.
+
+**TEXF is a genuinely ambiguous result and is flagged rather than resolved.** It produced our
+**best public score of the competition, 0.94637**, moving rank 437 -> **393** (2,338 teams) -- a
+real leaderboard gain. But it does not clear the internal promotion bar: OOF is flat vs TEX
+(+0.000003, inside the seed floor) and it carries 61 MORE features (166 vs 105), and its LB edge
+(+0.00002) sits inside the near-twin paired resolution. Per the standing tiebreak (Phase 16
+section 5, Phase 18: OOF is the trusted ranker, and between indistinguishable candidates the repo
+takes the simpler model), **TEX remains the champion for future twin ablations.** But TEXF's
+direction (restoring freq blocks helps, however slightly) is at least consistent with, not
+contradicted by, Phase 20's original (now-weakened) freq-removal finding, and is the one open
+thread worth an independent confirmatory twin next session rather than one more coin-flip-sized
+read tonight.
+
+**What stays open.** (1) Whether TEXF's freq-block LB edge is real -- needs a second, independent
+paired point before it can move the champion designation, regardless of what the public
+leaderboard currently shows. (2) The fixed-weight blend penalty question (Phase 20 lead 2) --
+untouched tonight, deliberately deprioritized behind the coverage and stack questions. (3)
+Coverage as a lever is now closed on every column tested (income, commute, age, the four
+remaining low-cardinality columns) -- any future OOF gain needs a genuinely different mechanism,
+not more key coverage. `experiments/runs.csv` rows: `c924bc0a` (TEX2), `ad44e7d4` (TXWC, screened
+not submitted), `98f5bf60` (TXWA), `9daece89` (TEXC), `1b80818a` (TEXF), `b5a318cf` (8-leg stack,
+submitted tonight). `pool.json` unchanged -- no leg swap, no promotion.
