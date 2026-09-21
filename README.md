@@ -2090,3 +2090,109 @@ remaining low-cardinality columns) -- any future OOF gain needs a genuinely diff
 not more key coverage. `experiments/runs.csv` rows: `c924bc0a` (TEX2), `ad44e7d4` (TXWC, screened
 not submitted), `98f5bf60` (TXWA), `9daece89` (TEXC), `1b80818a` (TEXF), `b5a318cf` (8-leg stack,
 submitted tonight). `pool.json` unchanged -- no leg swap, no promotion.
+
+### Phase 22 -- the 2-leg blend is a real promotion, not a wash; CatBoost carries its own family offset (2026-09-20/21)
+
+Five slots, all spent, closing both items Phase 21 left open plus a fresh, previously-untested
+axis. Four probes screened free on Kaggle CPU (5-concurrent), one computed free locally from
+already-archived artifacts, all pre-registered before submission.
+
+**Zero-slot work first.** `scripts/refit_gap.py` refit against 60 de-duplicated points: all-points
+fit slope 1.0241, intercept -0.02263, sigma 0.000097 (fit 2); rich-subset fit (OOF>=0.9459, n=29)
+slope 1.1225, intercept -0.11568, sigma 0.000060 (fit 3) -- the champion's own local calibration,
+now with 5 more points than Phase 21 had.
+
+**The five, screened OOF then submitted in descending order:**
+
+| probe | change | OOF | delta vs base | LB | fit3 pred | fit3 resid |
+|---|---|---|---|---|---|---|
+| **blend** | fixed logit-mean, TEX + TEXF (2 legs) | **0.946151** | +0.000029 vs TEX | **0.94638** | 0.94637 | +0.00001 |
+| TEXbag | TEX + `seed_bag=3` (in-fold model-seed bagging) | 0.946137 | +0.000015 vs TEX | 0.94636 | 0.94636 | +0.00000 |
+| TEX2F | TEX2 + freq_cols/freq_digit_cols restored | 0.946124 | +0.000015 vs TEX2 | 0.94636 | 0.94634 | +0.00002 |
+| CatTEX | TEX's rep, learner -> CatBoost, no native cats | 0.946114 | -0.000008 vs TEX | 0.94625 | 0.94633 | -0.00008 |
+| CatIncome | CatTEX + `Annual_Income_USD` as native CatBoost categorical | 0.945985 | -0.000129 vs CatTEX | 0.94613 | 0.94619 | -0.00006 |
+
+**1. The 2-leg fixed blend is a genuine promotion, and it answers Phase 20's open "fixed-weight
+blend penalty" question.** `stack_logit.py --mode logit_mean` on TEX (0.946122/0.94635) + TEXF
+(0.946125/0.94637) -- corr high, both champion-family, one freq-block field apart -- computed free
+from already-archived OOF/test artifacts, no kernel needed. OOF 0.946151 clears the reopening gate
+over TEX solo (+0.000029 >= 0.0000949) and the LB agrees: **0.94638, the best public score of the
+competition**, beating both TEX solo (0.94635) and TEXF solo (0.94637). This is the strongest kind
+of promotion this repo makes (Phase 20's own standard) -- OOF and LB agree, and it isn't a
+tiebreak between indistinguishable candidates, since +0.000029 clears the near-twin resolution
+(0.000027). **`champion` moves from `TEX` solo to the fixed 2-leg blend
+`logit_mean(TEX=43db301d, TEXF=1b80818a)`, archived as run `61fb5598`.**
+
+The four prior fixed-blend results at 6-8 legs all washed (Phase 15's 9-leg inversion, Phase 16b's
+8-leg WQ-pool wash, Phase 20's 6-leg B6 wash, Phase 21's 8-leg TEX-anchored stack wash). Tonight's
+2-leg blend does not. **The wash is leg-count-dependent, not an inherent property of averaging
+near-twins.** The mechanism this suggests: at 2 legs sharing ~166-105=61 features' worth of
+difference (freq blocks), there is still a little uncorrelated fold noise left to cancel; by 6-8
+legs drawn from the same representation family, the legs have converged enough that averaging only
+dilutes. This reopens small (2-3 leg) fixed blends as a live, cheap lever for future champion
+candidates -- but the champion is now itself a blend, so the next "strict twin" probe against it
+means re-running both TEX and TEXF's diff and re-blending, not a single retrain.
+
+**2. TEXbag banks the Final-B variance-reduced twin, cleanly.** OOF +0.000015 over TEX solo (F2's
+own bagging of E1 bought +0.000034, same order), LB ties TEX solo within near-twin noise
+(0.94636 vs 0.94635). Per playbook section 9, Final A = the honest best-OOF champion, Final B =
+the same idea with less fitted machinery / lower variance -- `seed_bag=3` is exactly that knob,
+and it costs nothing on this pair. Banked for the deadline-week final-slot decision, not submitted
+as a promotion attempt.
+
+**3. TEX2F is a second directionally-consistent but still sub-gate confirmation of the freq-block
+lead.** Built on TEX2 (Age ladder) rather than TEX, so this is a genuinely independent prediction
+vector, not a re-read of TEXF's own residual. Result: OOF flat (+0.000015, matching TEXF's own
++0.000003 -- freq blocks are unsupervised value-count features, historically null on OOF alone),
+LB edge over TEX2 solo (0.94636 vs TEX2's known 0.94635) is **+0.00001** -- inside the near-twin
+paired resolution (0.000027), same as TEXF's own +0.00002 edge over TEX. Two independent bases,
+two small positive edges, neither individually crossing the pre-registered confirmation gate.
+**Read together, not singly:** two same-signed near-twin-sized results is weak supportive evidence
+for a real small effect, not proof of one -- the honest reading is that if freq blocks carry a real
+LB-only edge, it is smaller than this instrument can confirm in one paired point, and a third
+independent base would be needed to move past "consistent but unconfirmed."
+
+**4. CatBoost carries its own family-specific LB offset, distinct from LightGBM's, even at matched
+OOF -- the first solo CatBoost submission of the competition.** Every prior CatBoost result (E5,
+E5r0) was a stack leg only, never submitted solo, so there was no direct CatBoost point on the
+OOF->LB line before tonight. CatTEX's OOF (0.946114) is a near-twin of TEX's own (0.946122,
+-0.000008) -- by the OOF instrument these are indistinguishable. Their LB scores are not:
+**0.94625 vs TEX's 0.94635, a real -0.00010 gap at matched OOF.** Against the rich-subset
+calibration line this is -0.00008, -1.4 sigma (against the broader all-points line, -0.00004,
+-0.4 sigma -- the two fits disagree on how surprising this is, which is itself informative: the
+tight rich-subset line was fit almost entirely on LightGBM-family points, so its sigma may
+understate CatBoost's true scatter). **This extends the family-generalization caution (Phase 3's
+G1, Phase 19's NE120 -- both early-stopped/high-variance learners) to a normally-trained,
+non-early-stopping-pathological GBDT of a different implementation.** The OOF->LB fit's own
+disclaimer -- "valid within the GBDT family ONLY" -- was calibrated on LightGBM/XGBoost points
+almost exclusively; today's evidence says CatBoost may need its own local offset even though it
+is unambiguously still a GBDT. Not chased further tonight (one point is not a slope), but a
+second CatBoost point (e.g. a future retrain at a different feature count) would settle whether
+this is a fixed offset or noise.
+
+**5. CatIncome closes the native-categorical-income axis for CatBoost too, and the isolation is
+clean.** Read against CatTEX (its own same-day, same-family baseline) rather than the generic
+calibration line, the LB delta (-0.00012) matches the OOF delta (-0.000129) almost exactly --
+confirming this is ordinary information loss, not displacement, extending Phase 20's SK-ladder
+finding (LightGBM's native categorical costs smoothly with cardinality, -0.000004/-0.000078/
+-0.000342) to a structurally different boosting implementation. **Phase 1c's structural claim --
+the per-value lookup is already fully extracted by the target encoder, and no downstream
+mechanism recovers more from the raw column -- now holds for both boosting families tested.**
+
+**What stays open.** (1) The freq-block lead is still short of confirmed after two independent
+near-twin-sized positive reads (TEXF, TEX2F) -- a third base or a larger-effect isolation would be
+needed to settle it either way. (2) CatBoost's own -0.00010 LB gap at matched OOF is one point, not
+a slope -- worth a second CatBoost submission before treating it as a fixed family offset. (3) The
+champion is now a 2-model fixed blend rather than a single trainable config, which changes what a
+"strict twin" of it means going forward -- future probes need to diff one side of the pair (TEX or
+TEXF's own recipe) and re-blend, or the comparison is confounded. `experiments/runs.csv` rows:
+`61fb5598` (blend, new champion), `50d84171` (TEXbag), `f0ba7251` (TEX2F), `3da3ad60` (CatTEX),
+`74c16e6e` (CatIncome). `pool.json` unchanged -- the curated 8-leg stack's own leg list is a
+separate question from the solo/blend champion tracked here.
+
+**Another duplicate-archive artifact, same class as Phase 18/19/20's.** An early attempt to
+background the TEX2F kernel poll raced the harness's own process tracking and got killed
+mid-flight, but not before it had already archived independently: `f59fab26` carries TEX2F's same
+OOF (0.946124) with no LB score, three seconds after the correctly-tracked retry archived the
+identical kernel as `f0ba7251` -- the run actually passed to `submit_run.py`. **De-duplicate on
+`run_tag=TEX2F`, keeping `f0ba7251`.**
