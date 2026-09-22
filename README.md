@@ -2380,3 +2380,26 @@ optimistic on top of being weak. Correlation vs OURS 0.984 -- genuinely looser t
 public pack, so it is the most decorrelated public material available -- but playbook section 6 says
 a leg below the pool floor contributes nothing however decorrelated (G1, Phase 2b). Offline ADD
 test only; no slot.
+
+**6. The rank combiner introduces ties, and they cost exactly nothing -- checked rather than
+assumed, because the tie density differs per slot and would otherwise have been a differential
+bias across the very comparisons tonight is built to make.** `logit_mean` on distinct
+probabilities is tie-free; `rank_mean` collides by construction, because a weighted average of
+percentile ranks lands on a lattice. Unique OOF values out of 668,665, and the gain from breaking
+every tie with an infinitesimal logit-blend perturbation:
+
+| blend | unique | OOF | tie-broken | gain |
+|---|---|---|---|---|
+| s1 `0.34o + 0.66[x5,v5]` | 666,638 | 0.946304 | 0.946304 | **-0.000000** |
+| s2 `0.34o + 0.66[6v,rm]` | 667,608 | 0.946395 | 0.946395 | **+0.000000** |
+| s3 `0.25o + 0.75[4 legs]` | 663,148 | 0.946388 | 0.946388 | **-0.000000** |
+| s4 `0.50o + 0.50[x5,v5]` | 619,774 | 0.946297 | 0.946297 | **+0.000000** |
+| s5 public only `[x5,v5]` | 554,468 | 0.946249 | 0.946249 | **+0.000000** |
+
+Zero at six decimal places even at slot 5, where **17% of rows are tied**. *Mechanism:* a tie only
+forms between rows the blend already scores near-identically, so resolving it is a coin flip and
+AUC's own tie handling (counting a tied pair as 0.5) is already the correct expected value.
+Breaking them buys the variance of a coin flip, not a gain. This is Phase 23's "breaking ties wins
+is worth 0.00000" verdict re-confirmed in the regime where ties actually exist -- there it was
+vacuous, because our champion had none. **No tiebreak is applied and none is needed**, and the
+five slots are not differentially biased by their tie densities.
