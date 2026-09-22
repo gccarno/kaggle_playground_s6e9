@@ -137,6 +137,34 @@ and "best score we can obtain" gets you the worst of both. The mitigation is tha
 scheduled reassessment with a written trigger, not an open option to drift. If week 3 arrives and the
 decision is not made deliberately, the default is that the ours-only rule stands.
 
+### The reassessment was held on 2026-09-21, on schedule, and the policy is now OPEN
+
+**The price, written down at the moment of the decision as §5 required.** Our ours-only champion
+stood at public **0.94638 = rank 448 / 2,648**. Public artifact-pooling was reaching ~0.94656 =
+rank ~90. **The ours-only rule was costing roughly 350 places of public rank.** The 0.9465–0.94675
+pack was confirmed by direct inspection to be largely *stacks over shared public OOF libraries*
+(Den Pugovkin's 15-teacher stack over `najiama/s6e9-oof` and megayak's six-view library), not
+better modelling — which is exactly the S6E7 pattern playbook §8 warns evaporates in a shakeup.
+
+**Decision: OPEN, with the hedge carried in the two final slots rather than in the rule.**
+Public artifacts may now enter a shipped model. The exposure is bounded structurally instead:
+
+- **Final A = the best ours-only model.** No public artifact in it, at any weight. This is the
+  entry that survives if the public-pooled pack evaporates on the private split, as it did in S6E7.
+- **Final B = the best public-mixed model.** This is the entry that wins if the pack's gains are
+  real.
+
+This replaces playbook §9's usual A/B split (honest champion vs variance-reduced twin) **for this
+competition only**, and it is a deliberate substitution, not a drift: the hedge still costs nothing
+(S6E8 measured Final A and Final B tying exactly at 0.97030 private), and it now hedges the one
+risk that is actually live here.
+
+**The load-bearing consequence: provenance must be auditable off disk.** Every public-mixed file is
+written by `scripts/public_blend.py`, which records the source dataset, per-leg weight and each
+leg's own fold count in `manifest.json`. A candidate whose public content cannot be read back off
+disk is **not selectable as a final** — that is what makes the A/B hedge enforceable on 2026-09-30
+rather than a thing we remember approximately.
+
 **Local-first iteration.** A full 5-fold LightGBM on this data runs in **32 seconds** on local CPU.
 This is the single biggest operational difference from S6E8 (~5 min local / ~15 min per kernel
 cycle). Kaggle kernels are reserved for GPU/neural legs and for the reproducible record of the
@@ -2196,3 +2224,95 @@ mid-flight, but not before it had already archived independently: `f59fab26` car
 OOF (0.946124) with no LB score, three seconds after the correctly-tracked retry archived the
 identical kernel as `f0ba7251` -- the run actually passed to `submit_run.py`. **De-duplicate on
 `run_tag=TEX2F`, keeping `f0ba7251`.**
+
+### Phase 23 -- the artifact policy opens, and the public axis is real but three times smaller than OOF says (2026-09-21/22)
+
+Board re-read before the first slot: **2,648 teams**, and a new #1 at **0.94827**, +0.00152 clear
+of an unchanged #2 (0.94675). One team, one jump, nobody following -- the shape of a leak or of
+public-LB probing, not of a mechanism. Noted, not chased. We stood at rank **448** on 0.94638.
+
+**Zero-slot work first, and it decided the whole night.**
+
+*1. The public frontier was inspected directly and has nothing mechanistic for us.* Four of the
+day's kernels were pulled and read. Marc Maldonado's "the generator remembers the original rows"
+is a genuinely good notebook -- and its best model is **OOF 0.94596, below our 0.946151**. Its
+headline lever, `max_bin` 255 -> 4095 (+0.00178 on a raw 13-column model), is the one we closed as
+a dead null in Phase 12 (P2, +0.000002) and again in Phase 18 (LWb255), for the reason its own
+ablation shows: on top of target encoding the same knob is worth +0.00020, and our TE is richer
+than theirs. Its `% 1000` digit family: +0.00001. The "breaking ties wins" guide is closed in one
+line -- **our champion submission has 286,571 unique values in 286,571 rows. Zero ties.** Worth
+exactly 0.00000, as AUC rank-invariance says it must be.
+
+*2. The community froze the same CV split we did.* `dariushafshar/s6e9-golem-oof-library` ships
+`folds_seed42.npy`, and it is **bit-identical** to this repo's `StratifiedKFold(5, shuffle=True,
+random_state=42)` over `train.csv` in original row order. Public OOF arrays therefore stack with
+ours row-for-row. Alignment is not what makes a *fixed* blend honest -- nothing is fitted, and every
+leg's OOF prediction for a row comes from a model that never saw it -- but it means a fitted stack
+over these legs would be fold-honest too, which is why the top of the board is stacking them.
+
+*3. The ours-only blend axis was enumerated exhaustively and is SATURATED.* 6,461 fixed logit-mean
+blends over 14 distinct champion-family recipes, k = 2..6:
+
+| legs | best OOF | vs champion 0.946151 |
+|---|---|---|
+| k=2 | 0.946189 | +0.000038 |
+| k=3 | 0.946194 | +0.000043 |
+| k=4 | 0.946196 | +0.000045 |
+| k=5 | 0.946196 | +0.000045 |
+| k=6 | 0.946196 | +0.000045 |
+
+**It is a plateau, not a hump, and its ceiling is half the shipping gate.** Phase 22's reading --
+"2 legs gain, 6-8 legs wash" -- does not survive full enumeration: there is no wash by leg count at
+all. The four prior washes were all *fitted* stacks; **the wash is a property of FITTING, not of
+leg count**, and Phase 22's leg-count mechanism is hereby corrected. `CatTEX` appears in all ten
+top blends -- the CatBoost leg is the only real diversity our own pool contains. This enumeration
+cost zero slots and saved two.
+
+**The five slots.**
+
+| slot | model | OOF | vs champ | LB | read |
+|---|---|---|---|---|---|
+| 1 | ours-only `TEX+TEX2F+CatTEX+E4r0` | 0.946196 | +0.000045 | **0.94634** | CatBoost offset propagates |
+| 2 | `OURS*0.50 + 6view+rmlp` | 0.946329 | +0.000178 | **0.94644** | public axis is real |
+| 3 | `OURS*0.34 + 6view+rmlp` | 0.946374 | +0.000223 | **0.94646** | best of the night |
+| 4 | `OURS*0.25 + 6view+rmlp` | 0.946393 | +0.000243 | **0.94645** | turns over |
+| 5 | `OURS*0.50 + xgb5f` **(control)** | 0.946255 | +0.000105 | **0.94644** | ties slot 2 |
+
+**1. The public axis is real, and it is the first LB gain since Phase 22.** All four public-mixed
+blends beat the ours-only champion (0.94638). Best: slot 3 at **0.94646**, rank **448 -> 261**,
+**+187 places**. `champion` moves to the public-mixed blend for **Final B** purposes; Final A stays
+ours-only per the §5 hedge.
+
+**2. But OOF overstates this axis by about 3x, and the control is what proves it.** OOF promised
++0.000178 to +0.000243; the LB delivered +0.00006 to +0.00008. The decisive point is slot 5:
+**matched to slot 2 on our own weight (0.50) but with no 10-fold leg anywhere in it**, it scores
+OOF 0.946255 against slot 2's 0.946329 -- a **+0.000073 OOF deficit that bought exactly 0.00000 LB**
+(both 0.94644). The pre-registered fork said that outcome means fold-count inflation explains the
+extra OOF, and it does. **The ~0.00018 10-fold discount measured on our own `e1495238` (OOF
+0.946122 -> LB 0.94617, where TEX at the IDENTICAL OOF scored 0.94635) reproduces on public
+artifacts.** Any future public leg must be read at its own fold count, and a 5-fold-honest public
+leg is worth as much as a 10-fold one that looks 0.00007 better on OOF.
+
+**3. The dose-response is flat, and must be read as one score, not three.** Slots 2/3/4 span
+0.94644-0.94646 -- **0.00002, inside the near-twin paired resolution (0.000027)**. Per playbook §5
+and Phase 21's own lesson, the honest reading is that public share anywhere in 0.50-0.75 buys the
+same thing; the apparent interior optimum at w=0.34 is not resolvable and **no weight tuning should
+be built on it**. What *is* resolved is the step from 0.00 to 0.50 public share: +0.00006, roughly
+2x the near-twin resolution.
+
+**4. CatBoost's family offset propagates through a fixed blend.** Slot 1 put `CatTEX` in at 1/4
+weight, gained +0.000045 OOF, and **lost 0.00004 LB** (0.94634 vs the champion's 0.94638) -- landing
+in the pre-registered "offset propagates" branch. Phase 22's -0.00010 solo offset is therefore a
+property of the predictions, not of the solo submission, and it survives averaging at roughly its
+weighted share. **CatTEX is not a free diversity leg**, whatever the ours-only enumeration's OOF
+says about it, and this is now the second measured case (with the 10-fold discount above) of our
+OOF ranking a leg that the LB then refuses.
+
+**What stays open.** (1) Final B's exact recipe -- tonight shows public share 0.50-0.75 is a
+plateau, so the choice should be made on the *5-fold-honest* legs it contains, not on OOF-max.
+(2) A 5-fold-only multi-leg public blend is untested and is the natural next probe, since slot 5
+showed a single 5-fold leg already matches two 10-fold ones. (3) Final A is now capped: the
+ours-only axis is enumerated and saturated at +0.000045 OOF, below gate, so Final A stays
+`blend(TEX, TEXF)` (0.946151 / 0.94638) unless a genuinely new ours-only mechanism appears.
+(4) The #1 at 0.94827 is unexplained. `experiments/runs.csv` rows: `7844a725` (slot 1),
+`413d78a3` (slot 2), `3096f75f` (slot 3), `e685c35f` (slot 4), `4b46b9dd` (slot 5, the control).
