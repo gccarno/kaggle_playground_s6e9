@@ -2316,3 +2316,67 @@ ours-only axis is enumerated and saturated at +0.000045 OOF, below gate, so Fina
 `blend(TEX, TEXF)` (0.946151 / 0.94638) unless a genuinely new ours-only mechanism appears.
 (4) The #1 at 0.94827 is unexplained. `experiments/runs.csv` rows: `7844a725` (slot 1),
 `413d78a3` (slot 2), `3096f75f` (slot 3), `e685c35f` (slot 4), `4b46b9dd` (slot 5, the control).
+
+### Phase 24 -- the fold-honesty question, and five public legs that were never read (2026-09-22/23)
+
+Phase 23 left one lead marked as the natural next probe: *"a 5-fold-only multi-leg public blend is
+untested."* Its own control slot is why -- a blend carrying one **5-fold** public leg (`xgb5f`)
+tied a blend carrying two **10-fold** legs (both 0.94644) while sitting **-0.000073 on OOF**, which
+reproduced on public artifacts the ~0.00018 10-fold discount already measured on our own
+`e1495238`. That made the discount a *description*. Tonight asks whether it is a **predictor**:
+does a fold-honest public blend that OOF ranks BELOW the 10-fold one actually beat it on the board?
+The answer decides Final B's recipe, which is the last open modelling decision here -- Final A is
+fixed and the ours-only axis is enumerated and saturated (Phase 23).
+
+**Five zero-slot findings, measured before any slot was spent. Two of them change what gets
+submitted.**
+
+**1. Five 5-fold-honest public legs were sitting in `data/public/` unregistered and unread.**
+`public_blend.py`'s REGISTRY carried only `xgb5f` and `lgbV5` out of `najiama/s6e9-oof`. Solo OOF
+against `train.csv` labels on our frozen split:
+
+| leg | solo OOF | folds | corr vs OURS |
+|---|---|---|---|
+| `lgbV5` (`Pure LGBM_V5`) | **0.946170** | 5 | 0.99624 |
+| `xgb5f` (`XGBoost_Triple_TE_5folds`) | 0.946142 | 5 | 0.99720 |
+| `lgbV6` | 0.946068 | 5 | 0.99641 |
+| `lgbV3` | 0.946064 | 5 | 0.99634 |
+| `lgbV1` | 0.945866 | 5 | 0.99543 |
+| *(OURS `61fb5598`)* | *0.946151* | *5* | -- |
+
+`lgbV5` alone **outscores our own champion at matched fold count**, and nothing in the repo had
+ever read it.
+
+**2. The fold-honest public side saturates at TWO legs.** Equal-weight public side, ours-weight
+0.34: `xgb5f+lgbV5` **0.946305**; `+lgbV3` 0.946284; `+lgbV6` 0.946270; `+lgbV1` 0.946268.
+Monotone decreasing -- the `Pure LGBM` V-series are near-twins of each other. Settled without a
+slot; two legs is the recipe.
+
+**3. The public legs are percentile RANKS and ours are probabilities, so Phase 23's nominal weights
+were never its effective weights.** Logit SDs: OURS **3.179**, `6view` **1.814**, `rmlp` **1.806**,
+`xgb5f` **3.150**. Under `logit_mean`, "0.34 ours / 0.66 public" weighted our side 0.34x3.18 = 1.08
+against 0.66x1.81 = 1.20 -- an **effective ~47/53, not 34/66**; at w=0.50 it was ~64/36. Phase 23's
+"flat plateau over public share 0.50-0.75" was therefore measured across an effective range of only
+~36-64%, which is a smaller span than it looked and partly explains why it read as flat.
+
+Switching to `rank_mean` (scale-free) is worth **+0.000039 / +0.000021 / +0.000008** OOF at
+w = 0.50 / 0.34 / 0.25 -- real, correctly signed (largest where the mismatch is worst), and **below
+the +0.0000949 shipping gate**. This is a parameterization correction, not a free win. For a blend
+whose legs are all in probability space it is a **no-op** (0.946305 logit vs 0.946304 rank), which
+is exactly what leaves tonight's slot 1 unconfounded.
+
+**4. `Sergey_LGBM_oof.csv` is structurally unsafe under a logit combiner, and this is the
+load-bearing reason the default flips.** Raw AUC 0.945329; after `logit(clip(p, 1e-6, 1-1e-6))` it
+collapses to **0.872301**. Its shipped values are not calibrated probabilities, and the clip
+silently ties a large block of rows -- a 0.073 AUC loss that no assert in the repo would have
+caught. A rank combiner is immune to whatever probability geometry a public file happens to arrive
+with. `public_blend.py` now defaults to `rank_mean` and, in `logit_mean` mode only, refuses any leg
+whose logit-clipped AUC differs from its raw AUC by more than 1e-4.
+
+**5. `dariushafshar/s6e9-golem-oof-library` is 19 members on our exact frozen 5-fold split, and is
+below the pool floor.** Best member `h` = 0.944507, 0.0017 under our champion; its three strongest
+(`a`, `h`, `i`) self-disclose early stopping on the held-out validation fold, so their OOF is
+optimistic on top of being weak. Correlation vs OURS 0.984 -- genuinely looser than the 0.996-0.997
+public pack, so it is the most decorrelated public material available -- but playbook section 6 says
+a leg below the pool floor contributes nothing however decorrelated (G1, Phase 2b). Offline ADD
+test only; no slot.
