@@ -2403,3 +2403,117 @@ Breaking them buys the variance of a coin flip, not a gain. This is Phase 23's "
 is worth 0.00000" verdict re-confirmed in the regime where ties actually exist -- there it was
 vacuous, because our champion had none. **No tiebreak is applied and none is needed**, and the
 five slots are not differentially biased by their tie densities.
+
+**The five slots, submitted in order, every one pre-registered in `experiments/runs.csv` before
+submission (commit `23a29c4`), and every OOF verified against the plan to 6 dp before any slot was
+spent.**
+
+| slot | recipe (all `rank_mean`) | OOF | LB | pre-registered gate | verdict |
+|---|---|---|---|---|---|
+| 1 | `0.34 OURS + 0.66[xgb5f, lgbV5]` (5-fold) | 0.946304 | **0.94644** | >=0.94646 confirms; <=0.94643 falsifies | **NO RESOLUTION** |
+| 2 | `0.34 OURS + 0.66[6view, rmlp]` (combiner control) | 0.946395 | **0.94645** | tie expected | **tie -- closed** |
+| 3 | `0.25 OURS + 0.75[6view, rmlp, xgb5f, lgbV5]` | 0.946388 | **0.94646** | >0.94646 => new Final B | **ties, does not exceed** |
+| 4 | `0.50 OURS + 0.50[xgb5f, lgbV5]` (5-fold) | 0.946297 | **0.94644** | >=0.94644 | **clears** |
+| 5 | `[xgb5f, lgbV5]`, **no ours** (the anchor) | 0.946249 | **0.94639** | -- | see below |
+
+**1. H1 is NOT promoted, and the pre-registration is what makes that call rather than hindsight.**
+Slot 1 landed at 0.94644 against Phase 23 slot 3's 0.94646 -- a -0.00002 difference, squarely inside
+the pre-registered **no-resolution band** (the 0.000027 near-twin paired SD). The gate demanded
+>=0.94646 to confirm and <=0.94643 to falsify; it delivered neither. Slot 4 cleared its own gate
+(0.94644, tying **both** of its paired Phase-23 points exactly). The joint condition was *both*, so
+per the pre-registration **the 10-fold discount stays a description and is not promoted to a
+predictor.** It would have been easy to read slot 1 as a win -- it carries a **-0.000070 OOF
+deficit** and gave up only 0.00002 on the board -- and playbook section 5 exists precisely to stop
+that reading.
+
+**2. What tonight actually establishes is stronger than what it was testing: the public axis is ONE
+BIT, and we already have it.** Four blends at public shares 0.50 / 0.66 / 0.75, with 5-fold legs,
+10-fold legs and mixtures of both, under two different combiners, span **0.94644-0.94646**. Their
+OOFs span 0.946297-0.946395, a range **four times larger**. Phase 23 found the *dose* flat; tonight
+extends that to **leg identity, fold count and combiner**. Everything with public content in it
+scores 0.94644-0.94646; our best ours-only model scores 0.94638. **The public axis is a single step
+of +0.00006-0.00008 and it saturates immediately** -- there is no composition of these artifacts
+left to search, and no further slot should be spent searching it.
+
+**3. The anchor is the most informative point of the night, and it reframes the mechanism.** Slot 5
+is two public legs we did not train, with nothing of ours in it: **OOF 0.946249 -> LB 0.94639**,
+against our own ours-only champion's **OOF 0.946151 -> LB 0.94638**. At **matched fold count** the
+public side is +0.000098 on OOF and **+0.00001 on the board** -- inside near-twin resolution. The
+rich-subset calibration line predicted +0.00011. So the OOF advantage evaporates even with fold
+count held fixed, which means **the effect was never specifically 10-fold inflation.**
+
+The residual table makes it unmissable. Against both refit lines, **every public-content blend sits
+below the line and every one of our own runs sits above it:**
+
+| run | OOF | LB | resid (fit 2) |
+|---|---|---|---|
+| blend (P23 s4, 10-fold) | 0.946393 | 0.94645 | **-0.00014** |
+| blend (P23 s3, 10-fold) | 0.946374 | 0.94646 | **-0.00011** |
+| blend (P23 s2, 10-fold) | 0.946329 | 0.94644 | **-0.00009** |
+| blend (P24 s5, **5-fold, public-only**) | 0.946249 | 0.94639 | **-0.00006** |
+| **OURS champion `61fb5598`** | 0.946151 | 0.94638 | **+0.00003** |
+| TEXbag / TEXF / TEX2F / TEX / TEX2 / TEXC / TXWA | ~0.9461 | 0.9463-0.9464 | **+0.00003 to +0.00009** |
+
+A clean sign split with no overlap, and the negative residual grows with how much public content the
+blend carries. **The OOF->LB line is a property of the SOURCE, not only of the model family.** Our
+own artifacts sit on one line; outside artifacts sit on another roughly 0.0001 below it at matched
+OOF, whatever their fold count. This is the same class of finding as Phase 3's G1 (family), Phase 22's
+CatBoost offset (implementation) and Phase 23's fold-count discount -- four instances now, and the
+general rule they share is: **an OOF produced by a pipeline we did not calibrate does not enter our
+instrument at face value.**
+
+**4. The combiner question is closed, and it closed the way the instrument said it would.** Slot 2
+is Phase 23 slot 3's strict twin in one field (`logit_mean` -> `rank_mean`): OOF +0.000021, **below
+the +0.0000949 shipping gate**; LB 0.94645 vs 0.94646, **-0.00001, below the near-twin resolution**.
+A sub-gate OOF move produced a sub-resolution LB move -- the instrument behaving exactly as
+specified. `rank_mean` is kept as the default because it is the *correct parameterization* (it is
+scale-free, so the weights mean what they say, and it cannot be silently destroyed by a leg that
+ships something other than calibrated probabilities -- finding 4), **not because it buys anything.
+It buys 0.00000.**
+
+**5. Final B does not move.** Slot 3 tied the competition's best public score at 0.94646 but the gate
+required strictly greater, so **Final B stays Phase 23 slot 3 (`3096f75f`)** and **Final A stays
+`61fb5598`** (ours-only `blend(TEX, TEXF)`, 0.94638). One thing is worth carrying to the deadline
+rather than deciding tonight: slot 3 (`1184af71`) reaches the *same* 0.94646 with **half its public
+side fold-honest and four legs instead of two**, which is a genuine playbook section 9 Final-B
+argument -- same score, less concentrated provenance -- and it is the only such argument on record.
+It is flagged, not promoted.
+
+**6. The calibration line's local slope is not stable and must not be extrapolated.** `refit_gap.py`
+over 70 de-duplicated points: fit 2 (all) slope 1.0175, intercept -0.01632, sigma 0.000094; fit 3
+(rich, OOF>=0.9459, n=39) slope **0.8524**, intercept 0.13986, sigma 0.000060. The rich-subset slope
+has now read 0.9974 (n=24, Phase 21), 1.1225 (n=29, Phase 22) and 0.8524 (n=39, tonight) across
+three successive refits. **That is not a moving truth, it is a noise-dominated estimate** -- Phase 21
+already found this fit reads its own noise as a trend on few clustered points, and adding 10 more
+points has now swung it the other way. The frozen Phase-3 values in section 4 (slope 1.0832, sigma
+0.000103) and the shipping gate derived from them stay exactly as they are, per section 4's standing
+rule. **Do not use the local slope to predict an LB score.**
+
+**7. The golem library is closed by ADD test, zero slots** (finding 5's prediction confirmed).
+Against slot 1's recipe as the pool, at a 1/3 public share and at a light 10% dose:
+
+| member | solo OOF | ADD (1/3 of public share) | ADD (10% dose) |
+|---|---|---|---|
+| `h` | 0.944507 | -0.000045 | +0.000004 |
+| `i` | 0.944407 | -0.000054 | +0.000001 |
+| `a` | 0.943742 | -0.000100 | -0.000012 |
+| `d_catboost` | 0.941672 | -0.000230 | -0.000050 |
+| `h_spline_gam` | 0.939913 | -0.000296 | -0.000061 |
+| `g_mlp` | 0.938375 | -0.000373 | -0.000080 |
+| `j_logreg` | 0.938094 | -0.000379 | -0.000080 |
+
+Null to negative everywhere, and **monotone in solo strength** -- the contribution tracks how good
+the leg is, not how decorrelated it is, even though this is the most decorrelated public material
+available (corr 0.984 against the pack's 0.996-0.997). The best case, `h` at a 10% dose, is
+**+0.000004 = one tenth of the seed-noise floor.** This is playbook section 7's rule firing again:
+*high disagreement is weakness, not diversity, unless it comes with competitive solo strength.*
+**19 members, zero usable, no slot spent.**
+
+**What stays open.** (1) Nothing on the public axis -- it is one bit, measured at four shares, two
+fold counts, two combiners and 21 candidate legs, and it is saturated at 0.94646. Our best public
+score is unchanged from Phase 23. (2) Final A is capped by Phase 23's ours-only enumeration; only a
+genuinely new ours-only mechanism would move it, and six phases of search have found none. (3) The
+source-offset finding in point 3 is the one genuinely new mechanism tonight produced, and it is the
+reason no further public artifact should be admitted on the strength of its OOF alone. (4) The #1 at
+0.94945 (up from 0.94827) remains unexplained and un-chased. `experiments/runs.csv` rows:
+`e6db88da` (s1), `b0eaa810` (s2), `1184af71` (s3), `7c4cdc76` (s4), `44e81167` (s5, the anchor).
