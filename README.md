@@ -2662,3 +2662,64 @@ have found none. (4) The #1 at 0.94945 is still unexplained and still un-chased.
 slots left and every axis closed, the honest remaining use of a slot is a paired point, not a
 search. `experiments/runs.csv` rows: `d8ef7c11` (s1, **Final A**), `2e2c756d` (s2, **Final B**),
 `99d6eaf9` (s3), `39873a34` (s4), `0e2fa556` (s5).
+
+### Phase 26 -- pre-registration: chasing the 0.94945 (2026-09-24, before any probe ran)
+
+Every axis this repo has opened is closed (Phase 25). The leaderboard at 2026-09-24 23:18 UTC:
+
+| rank | team | public | note |
+|---|---|---|---|
+| 1 | Team Alicia | **0.94945** | submitted 23:08 today |
+| 2 | Prior | 0.94676 | |
+| 3 | Chris Deotte | 0.94672 | Kaggle GM |
+| -- | *our Final B* | *0.94646* | the wall, five recipes deep |
+
+**+0.00269 clear of a Grandmaster, and no public notebook above 0.94656** (`kaggle kernels list
+--sort-by scoreDescending`: the entire public frontier is 0.9465x blend-tracking). A gap that size,
+that isolated, is an *information* difference and not a tuning difference -- and Phase 25 left it as
+the one thing still un-chased with six nights of slots in hand. Tonight chases it. Five probes, all
+offline, all pre-registered here before any of them ran.
+
+**Z1 -- the `id` axis.** HYPOTHESIS: the generator emitted rows in an order carrying target
+information (batch or curriculum drift), so `id` holds signal no recipe here has ever read -- `id`
+has never appeared in a probe. MECHANISM: if generation is sequential over a drifting latent, the
+per-id-block target rate departs from the global rate beyond binomial noise. GATE to open the axis:
+single-feature AUC of `id` >= 0.505, **or** id-block rate SD > 2x binomial expectation. Otherwise
+closed in one line.
+
+**Z2 -- the parent-cluster leak.** HYPOTHESIS: all 955,236 synthetic rows descend from the 10,000
+rows of `EV_Adoption_and_Range_Anxiety_Dataset.csv`; if generation is per-row conditional, parent
+identity is a latent variable and the parent's own `Will_Buy_EV` is a noisy read of it -- signal that
+lives *outside* the 13 features and therefore outside everything measured so far. MECHANISM: Phase 1
+closed this dataset on **coverage** (exact feature-tuple match covers 82 test rows) and never tested
+**nearest-parent** at all, which is a different claim. GATE: mean champion-OOF residual must differ
+between nearest-parent-label=Yes and =No by more than 3 SE, with the SE from the actual group sizes.
+Otherwise the original dataset is closed for good, on mechanism and not just on coverage.
+
+**Z3 -- the ceiling.** HYPOTHESIS: 0.94945 is reachable only if the true log-odds field is
+materially more dispersed than our model's. MECHANISM: for a perfectly calibrated model, AUC is a
+functional of the distribution of true `p` alone. Simulate `y ~ Bernoulli(p_oof)` and measure
+`AUC(p_oof, y_sim)`: that is the AUC a *perfect* model reaches on labels whose probability field
+looks like ours. Then solve for the log-odds scale `s` at which `s * our_logit` would reach 0.94945
+under its own labels. No gate -- this is the diagnostic that says whether the 0.00269 is a modelling
+gap or an information gap, and it is the number that decides how the remaining five nights are spent.
+
+**Z4 -- the joint-key lookup, with a permutation null this time.** HYPOTHESIS: Phase 1's
+nine-joint-key test ran on C2 (OOF 0.945225) and correctly read its largest-of-nine as selection;
+at champion strength, with keys fixed in advance and a permutation null instead of a binomial one,
+a real 2-way lookup may survive. MECHANISM: the same per-key residual-variance ratio, but the null
+comes from permuting the key labels within the realized model predictions, which absorbs exactly the
+anticorrelation that pushed Phase 1's ratios below 1.0 and made them hard to read. GATE: ratio must
+exceed the permutation null's 99th percentile on a key named before the number is seen.
+
+**Z5 -- test-augmented (pseudo-label) target encoding.** HYPOTHESIS: the income lookup's precision
+is bounded by ~50 train rows per value; pseudo-labelling the 286,571 test rows adds ~43% more
+support per value, sharpening the lookup precisely where backoff currently dominates. MECHANISM:
+this is the one mechanism visible on the public frontier that this repo has never run
+(`crystalbaby/pseudo-labels-without-lying-to-cv-15-teachers`), and unlike a blend it changes the
+*representation*, which is the only thing that has ever moved this competition. GATE: the
++0.0000949 shipping gate, on a strict twin of the champion recipe.
+
+Slots are not committed in advance tonight. Phase 25's verdict stands -- the public axis is
+saturated and no slot should be spent searching it -- so a slot gets spent only if a probe above
+produces something that needs a board point. Results below.
