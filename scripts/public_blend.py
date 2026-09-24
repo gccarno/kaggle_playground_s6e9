@@ -96,7 +96,24 @@ REGISTRY = {
               5, "najiama/s6e9-oof"),
     # Sergey_LGBM is deliberately NOT registered: its shipped values are not calibrated
     # probabilities and it loses 0.073 AUC under logit clipping (README Phase 24 finding 4).
+    # Phase 25: najiama's 10-fold XGBoost twin, and megayak's six views taken APART. Phase 24
+    # only ever used the pre-made `ensemble` column, which cannot express "D and F add even
+    # though they are weaker" -- the one claim the library's own card makes. Enumerating all
+    # of them (scripts/enum_public.py, 3,282 blends) moved the ceiling +0.000016 and closed
+    # the axis; they are registered so that result is reproducible, not because any ships.
+    "xgb10f": ("s6e9-oof/XGBoost_Triple_TE_10folds_oof.csv", None,
+               "s6e9-oof/XGBoost_Triple_TE_10folds_test.csv", None,
+               10, "najiama/s6e9-oof"),
 }
+_SIXVIEW = {
+    "sixA": "A_lgbm_triple_te_digits_3seed", "sixB": "B_xgb_on_A_features",
+    "sixC": "C_no_digits_windows_lift_sm2_30_300", "sixD": "D_no_exact_key_ladder_windows",
+    "sixE": "E_ladder25_250_2500_lift_sm5_50_500", "sixF": "F_exact_rate_as_init_score",
+}
+for _k, _c in _SIXVIEW.items():
+    REGISTRY[_k] = ("s6e9-six-feature-views-oof-library/oof_six_views.csv", _c,
+                    "s6e9-six-feature-views-oof-library/test_six_views.csv", _c,
+                    10, f"megayak/s6e9-six-feature-views-oof-library (view {_k[-1]})")
 
 
 def _col(df, col):
