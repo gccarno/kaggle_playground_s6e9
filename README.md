@@ -2579,3 +2579,86 @@ one of them already averaged over three model seeds**, which is strictly less pr
 for an unseen split at no measured cost. Per playbook section 9 you can only *select* what you
 *submitted*, and this has never been submitted -- which is what makes it worth a slot rather than a
 line in this file.
+
+**The five slots, each pre-registered in `experiments/runs.csv` before submission (commit
+`ea0cdc2`), every OOF verified against the enumeration before any slot was spent.**
+
+| slot | model | OOF | LB | pre-registered gate | verdict |
+|---|---|---|---|---|---|
+| 1 | ours-only `rank_mean(TEXbag, TEXF, TEX2F)` | 0.946158 | **0.94638** | >=0.94635 => adopt | **CLEARS -- new Final A** |
+| 2 | `0.34 OURS3 + 0.66[6view, rmlp, xgb5f, lgbV5]` | 0.946378 | **0.94646** | >=0.94645 => adopt | **CLEARS -- new Final B** |
+| 3 | pure public **10-fold** `[6view, rmlp]`, no ours | 0.946383 | **0.94641** | (a) <=0.94641 / (b) >=0.94648 / (c) between | **(a) fires** |
+| 4 | `0.25 OURS + 0.75[sixB, sixD, rmlp, xgb10f]` -- OOF-max of 3,282 | 0.946404 | **0.94646** | >0.94646 => new best | **ties, no new best** |
+| 5 | `0.25 OURS + 0.75[rmlp, xgb5f, lgbV5, lgbV6]` -- 75% fold-honest | 0.946344 | **0.94646** | read only as s4 - s5 | **s4 - s5 = 0.00000** |
+
+**1. Slot 3 settles the fold question, and it is the first UNDILUTED measurement of it in this
+competition.** Its matched arm is Phase 24 slot 5. Both are pure public, both `rank_mean`, both two
+legs, and **neither contains a single prediction we trained** -- so the only difference between them
+is the fold count of the legs:
+
+| arm | legs | folds | OOF | LB |
+|---|---|---|---|---|
+| Phase 24 slot 5 (`44e81167`) | `xgb5f + lgbV5` | **5** | 0.946249 | 0.94639 |
+| **Phase 25 slot 3 (`99d6eaf9`)** | `6view + rmlp` | **10** | 0.946383 | **0.94641** |
+| | | | **+0.000134** | **+0.00002** |
+
+**A +0.000134 OOF advantage bought +0.00002 on the board: a transfer ratio of about 15%.** Branch
+(a) of the pre-registered fork fires -- the gain does not transfer -- and the implied inflation for
+a 5 -> 10 fold step is **~0.000114**, the same order as the ~0.00018 measured on our own
+`e1495238` and now measured a second time by a completely independent route. Every previous read of
+this effect was on a blend diluted with our own predictions; this one is not, which is why it is
+worth more than the four before it.
+
+**2. Slots 4 and 5 are the matched pair, and they confirm the source offset at identical weight.**
+Same ours run, same ours-weight (0.25), same number of public legs (4), differing **only** in fold
+composition -- 0% fold-honest against 75%:
+
+| | public side | fold-honest | OOF | LB |
+|---|---|---|---|---|
+| slot 4 | `sixB + sixD + rmlp + xgb10f` | 0/4 | 0.946404 | 0.94646 |
+| slot 5 | `rmlp + xgb5f + lgbV5 + lgbV6` | 3/4 | 0.946344 | 0.94646 |
+| | | | **+0.000060** | **0.00000** |
+
+The pre-registration said `s4 - s5 <= 0` confirms the offset and `~+0.00006` refutes it.
+**It is exactly 0.00000.** Our OOF pays about +0.00005 per quarter of the public side converted to
+10-fold content and **the board pays nothing at all.** Together with slot 3 this is two independent,
+separately pre-registered tests landing on the same verdict in one night, on top of Phase 23 slot 5
+and Phase 24's residual sign-split. **The effect is established; it should not be probed again.**
+
+**3. Slot 4 closes the public axis on the board, not just offline.** It is the OOF maximum over all
+**3,282** enumerated blends -- every subset of 14 public legs up to size four, at three weights,
+with megayak's library taken apart into its six views. It scores **0.94646**: identical to Phase 23
+slot 3, Phase 24 slot 3, and both of tonight's other mixed blends. **Exhaustive OOF search over the
+entire public axis buys 0.00000.**
+
+And the ceiling is hard. Tonight's three mixed blends span OOF **0.946344-0.946404** across three
+structurally different compositions and **all three score 0.94646** -- as did two earlier blends at
+yet other compositions. Five different recipes, five different OOFs, one leaderboard score.
+**0.94646 is a wall, and it is where this axis ends.**
+
+**4. Both finals are upgraded, at zero cost in public score and strictly lower variance.** This is
+playbook section 9's pattern doing exactly what S6E8 measured it doing -- the hedge is free.
+
+- **Final A moves to `d8ef7c11`**: ours-only `rank_mean(TEXbag, TEXF, TEX2F)`, OOF 0.946158,
+  **LB 0.94638 -- tying the outgoing `61fb5598` exactly.** Three legs instead of two, one of them
+  already averaged over three model seeds. Adopted on the variance property, not on the +0.000008
+  OOF, which is inside the seed floor and is not the argument.
+- **Final B moves to `2e2c756d`**: `0.34 OURS3 + 0.66[6view, rmlp, xgb5f, lgbV5]`, OOF 0.946378,
+  **LB 0.94646 -- tying the outgoing `3096f75f` exactly.** Four public legs instead of two with
+  **half of them fold-honest**, over the three-leg seed-bagged ours side, under the correct
+  scale-free combiner. Same score, more legs on both sides, less concentrated provenance. This is
+  the candidate Phase 24 point 5 flagged and declined to promote; it now has its own paired point.
+
+The README section 5 hedge is unchanged in kind -- Final A contains no public artifact at any
+weight, Final B carries the public mix -- and both sides of it are now the lower-variance member of
+their own family.
+
+**What stays open.** (1) **Nothing on the public axis.** It is saturated at 0.94646, confirmed by
+3,282 offline blends and five board points at five different compositions. No further slot should be
+spent on it, and that includes the remaining nights. (2) The fold/source offset is established by
+two undiluted pre-registered tests and needs no further probing. (3) Final A remains capped by Phase
+23's ours-only enumeration; only a genuinely new ours-only mechanism would move it, and seven phases
+have found none. (4) The #1 at 0.94945 is still unexplained and still un-chased. With six nights of
+slots left and every axis closed, the honest remaining use of a slot is a paired point, not a
+search. `experiments/runs.csv` rows: `d8ef7c11` (s1, **Final A**), `2e2c756d` (s2, **Final B**),
+`99d6eaf9` (s3), `39873a34` (s4), `0e2fa556` (s5).
