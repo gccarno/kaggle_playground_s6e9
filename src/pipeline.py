@@ -196,6 +196,28 @@ DEFAULTS = {
     "te_backoff_bins": 200,          # quantile bins defining a neighborhood (fold-fit)
     "te_backoff_smooth": 50.0,       # smoothing of the neighborhood level toward the prior
     "te_count_feature": False,       # also emit log1p(train-fold count) per encoded column
+    # -- PSEUDO-LABEL AUGMENTED ENCODERS (README Phase 26 / Z5c-Z5d).
+    #    The per-value income encoder's precision is bounded by ~50 train rows per value.
+    #    With te_pseudo on, each fold runs TWO passes: pass 1 fits a deliberately lean
+    #    model on the train fold's own (train-only-encoded) frame and predicts the TEST
+    #    rows; pass 2 refits every te_cols encoder with those 286,571 test rows included
+    #    as SOFT-LABELLED support, which is 42.9% more rows per value.
+    #
+    #    Why this is not a leak: the pass-1 model sees only the training fold's labels, so
+    #    its test predictions are independent of the validation fold's labels, and pass 1
+    #    is fitted with FIXED rounds and no eval_set -- routing it through fit_predict
+    #    would early-stop on (Xva, yva) and thereby choose the pass-1 model using the very
+    #    labels the pass-2 encoder is scored against. That is the one way to get this
+    #    wrong and it is why pass 1 has its own fitter.
+    #
+    #    Measured (Z5d, lean 3-column recipe, five folds): +0.000430 over train-only,
+    #    of which the constant-prior control (same support, zero information) explains
+    #    only +0.000087 and the shuffled-soft-label control scores -0.000237. The
+    #    information half is +0.000343.
+    "te_pseudo": False,
+    "te_pseudo_rounds": 400,         # pass-1 boosting rounds (FIXED: no early stopping)
+    "te_pseudo_lr": 0.05,            # pass-1 learning rate
+    "te_pseudo_leaves": 31,          # pass-1 num_leaves
     # -- the public frontier's encoder recipe: TE over QUANTILE-BINNED and PAIRED keys
     #    with very heavy smoothing, rather than our raw per-value keys at te_smooth=5.
     #    Default-off, so every archived run is bit-identical to what it was.
@@ -409,7 +431,7 @@ def _te_stats(values, y):
     return pd.DataFrame({"v": values, "y": y}).groupby("v")["y"].agg(["sum", "count"])
 
 
-def _fit_encoder(values, y, bins, cfg, prior, smooth=None):
+def _fit_encoder(values, y, bins, cfg, prior, smooth=None, extra=None):
     """Build a value -> encoded-rate mapping, plus the backoff needed for unseen values.
 
     Two backoff modes, and the difference is the whole point of the `te_backoff` knob:
@@ -422,6 +444,22 @@ def _fit_encoder(values, y, bins, cfg, prior, smooth=None):
                    the column carries a real monotone trend UNDERNEATH the lookup
                    (Spearman(value, rate) = 0.68) that the global prior throws away.
     """
+    if extra is not None:
+        # extra = (values, SOFT targets in [0,1], bins-or-None) -- unlabelled rows given a
+        # model's predicted probability and folded into the per-value statistics. _te_stats
+        # is a groupby sum/count, so a float target is already well defined: a soft label
+        # of 0.3 contributes 0.3 of a buyer and 1 of a row, exactly as a fractional
+        # observation should. Callers must guarantee these rows carry no information about
+        # the labels being predicted (see cfg["te_pseudo"]).
+        ev, ey, eb = extra
+        values = np.concatenate([np.asarray(values), np.asarray(ev)])
+        y = np.concatenate([np.asarray(y, dtype=np.float64),
+                            np.asarray(ey, dtype=np.float64)])
+        if bins is not None:
+            # No bins for the extra pool means the neighborhood backoff cannot be built
+            # consistently, so drop to the prior rather than silently misalign lengths.
+            bins = (pd.Series(np.concatenate([np.asarray(bins.values), np.asarray(eb)]))
+                    if eb is not None else None)
     st = _te_stats(values, y)
     if cfg["te_backoff"] == "neighborhood" and bins is not None:
         bst = _te_stats(bins, y)
@@ -451,7 +489,29 @@ def _fit_encoder(values, y, bins, cfg, prior, smooth=None):
     return enc, st["count"], bin_rate
 
 
-def apply_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
+def _pseudo_label_test(cfg, Xtr, ytr, Xte):
+    """Pass-1 soft labels for the TEST rows, for cfg["te_pseudo"].
+
+    Deliberately NOT routed through fit_predict(): that fitter always passes
+    eval_set=[(Xva, yva)] with early stopping, so the number of rounds -- and therefore
+    the predictions -- would be chosen using the validation fold's labels. Those
+    predictions then go on to build the encoder that the same validation fold is scored
+    with, which is a leak with no assert anywhere to catch it. Fixed rounds, no eval_set,
+    train-fold labels only.
+
+    Lean by design: this is a support-weighting device for the encoders, not a model whose
+    own accuracy is shipped, and Z5c measured the gain with a 400-round lr=0.05 pass 1.
+    """
+    import lightgbm as lgb
+    m = lgb.LGBMClassifier(n_estimators=int(cfg["te_pseudo_rounds"]),
+                           learning_rate=float(cfg["te_pseudo_lr"]),
+                           num_leaves=int(cfg["te_pseudo_leaves"]),
+                           random_state=cfg["model_seed"], n_jobs=-1, verbose=-1)
+    m.fit(Xtr, ytr)
+    return m.predict_proba(Xte)[:, 1]
+
+
+def apply_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed, pseudo=None):
     """Fit per-value target encodings on the TRAINING FOLD ONLY.
 
     Training rows get their encoding from an inner K-fold so a row never contributes to
@@ -471,6 +531,13 @@ def apply_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
     """
     prior = float(ytr.mean())
     new_cols = []
+    # `pseudo`, when given, is an array of soft labels aligned to Xte. The extra pool IS
+    # Xte: its own raw column values plus these soft labels. Note it is added to BOTH the
+    # inner-fold fits (which produce the training rows' encodings) and the full-fold fit
+    # (which produces the val/test rows'), because a test row is never scored and so can
+    # never contribute to its own encoded value the way a train row can.
+    if pseudo is not None and len(pseudo) != len(Xte):
+        raise ValueError(f"pseudo has {len(pseudo)} rows, Xte has {len(Xte)}")
     smooths = list(cfg["te_multi_smooth"]) if cfg["te_multi_smooth"] else [None]
     for c in cols:
         # A local de-categorized VIEW for the encoding arithmetic only -- Xtr[c]/Xva[c]/
@@ -515,7 +582,10 @@ def apply_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
                 for i, j in inner.split(Xtr, ytr):
                     e, n, br = _fit_encoder(ctr.iloc[i].values, ytr[i],
                                             None if btr is None else btr.iloc[i], cfg,
-                                            prior, sm)
+                                            prior, sm,
+                                            extra=None if pseudo is None else
+                                            (cte.values, pseudo, None if bte is None
+                                             else bte.values))
                     fb = (pd.Series(prior, index=Xtr.index[j]) if br is None
                           else btr.iloc[j].map(br).fillna(prior))
                     enc_tr[j] += ctr.iloc[j].map(e).fillna(fb).astype(np.float64).values / reps
@@ -524,7 +594,10 @@ def apply_target_encoding(Xtr, ytr, Xva, Xte, cols, cfg, rng_seed):
             Xtr[name] = enc_tr
             last_cnt_tr = cnt_tr
 
-            e, n, br = _fit_encoder(ctr.values, ytr, btr, cfg, prior, sm)
+            e, n, br = _fit_encoder(ctr.values, ytr, btr, cfg, prior, sm,
+                                    extra=None if pseudo is None else
+                                    (cte.values, pseudo, None if bte is None
+                                     else bte.values))
             last_n = n
             for X, c_, b in ((Xva, cva, bva), (Xte, cte, bte)):
                 fb = prior if br is None else b.map(br).fillna(prior)
@@ -1145,6 +1218,16 @@ def main():
         if cfg["te_cols"]:
             apply_target_encoding(Xtr, ytr, Xva, Xte, cfg["te_cols"], cfg,
                                   cfg["cv_seed"] + f)
+            if cfg["te_pseudo"]:
+                # Pass 1 reads the train-only encodings just written above; pass 2
+                # OVERWRITES those same te_* columns in place with encoders that also see
+                # the test rows as soft-labelled support. Same column names, so the
+                # feature set and its order are unchanged -- the representation is the
+                # only thing that moves, which is what makes this a strict twin.
+                pseudo = _pseudo_label_test(cfg, Xtr, ytr, Xte)
+                apply_target_encoding(Xtr, ytr, Xva, Xte, cfg["te_cols"], cfg,
+                                      cfg["cv_seed"] + f, pseudo=pseudo)
+                print(f"  te_pseudo pass1: mean soft label {pseudo.mean():.6f}", flush=True)
         if cfg["te_bin_cols"]:
             apply_key_target_encoding(Xtr, ytr, Xva, Xte, cfg["te_bin_cols"],
                                       cfg["te_bin_smooth"], cfg["te_bins"], cfg,
