@@ -2722,4 +2722,182 @@ this is the one mechanism visible on the public frontier that this repo has neve
 
 Slots are not committed in advance tonight. Phase 25's verdict stands -- the public axis is
 saturated and no slot should be spent searching it -- so a slot gets spent only if a probe above
-produces something that needs a board point. Results below.
+produces something that needs a board point.
+
+### Phase 26 -- results: four nulls, the lookup finally EXPLAINED, and a live mechanism (2026-09-25)
+
+**Z1 -- the `id` axis is null, and it is a clean null.** `AUC(id) = 0.499990`. Per-id-block target
+rate SD against binomial expectation, at four block counts: 10 blocks ratio 0.796, 50 blocks 0.964,
+200 blocks 0.961, 1000 blocks 1.024. Residual-vs-`id` slope +0.002897 against a bootstrap SD of
+0.006074, **z = +0.48**. The generator's emission order carries nothing. Closed; the gate demanded
+AUC >= 0.505 or a rate-SD ratio > 2.0 and got neither.
+
+**Z3 -- the ceiling, and it is the most decision-relevant number of the night.** For a perfectly
+calibrated model, AUC is a functional of the distribution of true `p` alone, so simulating
+`y ~ Bernoulli(p_oof)` and scoring `AUC(p_oof, y_sim)` gives the AUC a *perfect* model reaches on a
+probability field shaped like ours. Rate pinned at 0.174645 by bisection so only dispersion varies
+(the first pass rescaled about the mean logit, which moved the positive rate to 0.30 and made AUC
+rise for two reasons at once -- that pass is not the one reported):
+
+| | logit SD | ceiling AUC |
+|---|---|---|
+| our field (TEXbag OOF) | 3.1911 | **0.945665** |
+| observed against real labels | -- | **0.946137** |
+
+**Observed sits +0.000472 ABOVE the self-consistent ceiling**, so the true probability field is
+slightly *sharper* than ours and we are demonstrably not at any ceiling. Then the operative
+question -- how much independent missing signal would explain Team Alicia's 0.94945:
+
+| independent missing signal, log-odds SD | ceiling AUC | vs ours |
+|---|---|---|
+| 0.0 | 0.945665 | -- |
+| 0.3 | 0.945721 | +0.000056 |
+| 0.5 | 0.946177 | +0.000512 |
+| 0.7 | 0.947306 | +0.001641 |
+| **1.0** | **0.949144** | **+0.003479** |
+
+**The gap to #1 is worth an independent feature of about 1.0 log-odds SD.** Our entire logit field
+has SD 3.19, so that is a feature carrying roughly 9% of the total log-odds variance. The
+calibration that makes this land: everything this repo has found in 25 phases, baseline 0.94164 to
+0.946137, is **+0.0045 -- which on the same table is a missing-signal SD of about 1.1.** So
+**#1's edge is the same size as every mechanism we have discovered put together.** It is not a
+refinement, it is not a stack of +0.0001s, and that retroactively explains why seven phases of
+careful search found nothing: you do not find a 9%-of-variance feature by tuning. It is either
+reachable or it is not.
+
+**Z4 -- no joint-key lookup, and this time the null is properly calibrated.** Phase 1 ran nine joint
+keys against a *binomial* null on C2's residuals, which put the ratios at 0.85-1.07 and made them
+hard to read (an OOF prediction for value *v* is built from other folds' rows of *v*, which
+anticorrelates the error and pushes the ratio below 1). Replacing it with a **permutation null that
+shuffles key assignment within probability strata** absorbs exactly that, and the null mean lands
+where it should, at ~1.0. Ten keys fixed before any number was read, plus a control:
+
+| key | nkeys | ratio | null p99 | z |
+|---|---|---|---|---|
+| `nHome x nWork` | 254 | 1.1327 | 1.2048 | +1.57 |
+| `ECL x Subsidy x HomeCharge` | 20 | 1.2319 | 1.7559 | -0.17 |
+| `income5k x HomeCharge` | 56 | 0.9178 | 1.4102 | -0.38 |
+| `income5k x commute5` | 295 | 0.9211 | 1.1288 | -0.59 |
+| *(six more, all null)* | | 0.57-0.92 | | -3.37 to -0.89 |
+| **CONTROL random 300 keys** | 300 | **1.1397** | 1.1614 | **+1.78** |
+
+**The random-key control's z is higher than every one of the ten real keys.** Nothing here is signal,
+and the control is what licenses saying so. Note also the magnitude argument from Z3: a missing
+feature of 1.0 log-odds SD would drive a ratio many multiples above 1, not 1.13. Joint-key lookups
+cannot host a thing that size. Closed.
+
+**Z2 was answered with the wrong key, and Z6 is the right one -- it EXPLAINS README section 6.**
+Z2 matched each train row to its nearest of the 9,466 usable original rows in 13-d standardised
+space: median distance 1.22, 9,093 distinct parents used, and a clean null (residual difference
+z = **-0.37** on the nearest quartile; adding the parent label *lowered* AUC). That null is real but
+it answers the wrong question, because nearest-neighbour in 13-d is not how the generator indexes
+its source. **`Annual_Income_USD` is a near-unique key into the original dataset**, and an exact
+join is a completely different instrument:
+
+- 8,915 distinct income values in the original; **8,571 of them map to exactly one original row**
+  (335 to two, 8 to three, and income 30000 -- the clip point -- to 557).
+- **75.8% of train rows and 75.8% of test rows** carry an income value with a unique parent.
+- Among the 5,524 income values with >= 20 train rows and exactly one parent, the **train per-value
+  target rate is 0.2744 when that parent bought and 0.1804 when it did not -- a +0.0940 gap at
+  z = +16.84**, against a global rate of 0.1746.
+
+**That is the lookup table.** README section 6 has described `Annual_Income_USD` as a
+"value -> target lookup, not a magnitude" since Phase 1, with Spearman(value, rate) = 0.68 and a
+per-value residual rate SD of 0.0748 -- correct, load-bearing, and until tonight unexplained. The
+mechanism is that **income identifies a source row, and the source row's own label leaks through the
+generator into every synthetic child of it.** Phase 1's B6 result -- forbidding non-monotonicity in
+income costs 39 sigma -- is that leak being forbidden. The lever this repo has been pulling since
+day one now has a name.
+
+**And Z6b closes it in the same breath: it is already ~95% extracted, and no feature can get the
+rest.** Against TEXbag's own OOF, row level, on the 506,588 train rows with a unique parent: mean
+residual +0.003416 for parent-bought against -0.001047 for parent-did-not, a difference of
+**+0.004463 at z = +4.32** -- real, but 5% of the +0.0940 the raw per-value rate shows, because the
+per-value TE has already absorbed the rest. Adding it as an additive bump *lowers* AUC at every dose
+tried (0.945116 -> 0.945072 -> 0.944812 -> 0.943964 at eps = 0.003 / 0.01 / 0.03). And it is **flat
+across train support** rather than concentrated where the encoder is weakest, which is where a
+feature would have had room:
+
+| train support of the income value | rows | residual diff | z |
+|---|---|---|---|
+| 0-5 | 903 | +0.011139 | +0.55 |
+| 5-10 | 1,871 | +0.004967 | +0.46 |
+| 10-25 | 13,705 | +0.010174 | +2.06 |
+| 25-50 | 55,136 | +0.003884 | +1.22 |
+| 50-100 | 127,770 | +0.004605 | +2.31 |
+| 100+ | 307,203 | +0.004093 | +3.01 |
+
+No trend. And the pocket where the parent could beat the encoder is tiny: of test rows with train
+support < 10 (2.29% of test) only 22.05% have a unique parent, and of the 0.58% on an income value
+unseen in train only **4.95%** do. Upper bound if the parent label were used *perfectly* on the
+low-support pocket: **0.000022 / 0.000033 / 0.000265** of AUC at support < 5 / 10 / 25 -- and the
+last of those assumes perfect exploitation of a z ~ 2 effect. Below the gate at best. **The original
+dataset is now closed on mechanism, not just on Phase 1's coverage argument -- and it is closed
+having finally explained the biggest single finding in this repo.**
+
+**Z5 -- the one live mechanism, and the first version of it was wrong because my own diagnostic
+leaked.** The pre-registered question was whether pseudo-labelling the 286,571 test rows sharpens
+the income encoder. The first pass used the archived `test_proba_lgb.csv` as the soft labels and
+reported the encoder predicting held-out per-value rates better by wRMSE -0.003190 / standalone AUC
++0.005782, uniformly across all five folds. **That is not the mechanism, it is a leak:**
+`src/pipeline.py` builds that file as `test_proba += pt / n_folds`, the 5-fold average, so it carries
+information from every train row's label including the held-out fold's. Rebuilt with per-fold
+pseudo-labels from a model trained on folds != f only, the same measurement gives wRMSE **-0.001039**
+/ AUC **+0.001963** -- a third of the size. The uniform sign across folds was the tell, and it is
+recorded here because the leaked number would have justified a much bigger claim.
+
+Then end to end, five folds, frozen split, lean recipe (Z5c/Z5d):
+
+| arm | OOF | vs train-only |
+|---|---|---|
+| A train-only TE | 0.944001 | -- |
+| **B pseudo-augmented TE** | **0.944431** | **+0.000430** |
+| D augmented with the CONSTANT PRIOR | 0.944088 | +0.000087 |
+| E augmented with SHUFFLED soft labels | 0.943765 | **-0.000237** |
+
+**D and E are what make B believable.** The augmented encoder sees 42.9% more rows per income value,
+so at fixed `te_smooth` it shrinks less -- a different encoder even if the soft labels say nothing.
+D holds the support constant and sets the information to zero: it explains only **+0.000087**, below
+the shipping gate, so smoothing is a fifth of the effect. E keeps the support *and* the soft-label
+marginal distribution and destroys only the row-to-value association: it scores **-0.000237**,
+actively worse than baseline. An encoder that is corrupted by scrambling which value a soft label
+belongs to is an encoder that was using that association. **B - D = +0.000343, 3.6x the shipping
+gate, and it is information.**
+
+**Z5e -- and it survives the champion's representation.** The obvious objection is redundancy: the
+champion carries eleven TE columns, eight of them multi-scale quantile-bucket encoders
+(`q_income_10/50/500/5000`, `q_commute_1/2/5/10`) that are themselves pooled estimates of the same
+per-value rate at coarser support, and README Phase 1b/1c measured three separate times that several
+routes to one problem shrink each other. Same harness, champion-shaped feature set:
+
+| | OOF | pseudo-label gain |
+|---|---|---|
+| 3-column TE, train-only / pseudo | 0.944057 / 0.944520 | **+0.000463** |
+| 11-column TE, train-only / pseudo | 0.944370 / 0.944704 | **+0.000334** |
+| multi-scale pooling alone (11col - 3col, train-only) | +0.000313 | -- |
+
+The redundancy is real but partial -- it takes 28% of the gain, not all of it -- and **+0.000334 is
+still 3.5x the shipping gate**, with all five folds positive in both arms. This is the first new
+ours-only mechanism since Phase 20.
+
+**`te_pseudo` is implemented in `src/pipeline.py` (commit `c5e4771`), default off.** Each fold runs
+two passes: pass 1 fits a lean model on the training fold only and predicts the test rows; pass 2
+refits every `te_cols` encoder with those rows folded in as soft-labelled support, overwriting the
+same column names so the feature set and its order are unchanged and the probe stays a strict twin.
+`_te_stats` is a groupby sum/count, so a soft label of 0.3 contributes 0.3 of a buyer and 1 of a row
+-- a fractional observation, already well defined.
+
+**The one way to get this wrong, and why pass 1 has its own fitter.** `fit_predict()` always passes
+`eval_set=[(Xva, yva)]` with early stopping, so routing pass 1 through it would choose the pass-1
+model's number of rounds -- and therefore its test predictions -- **using the validation fold's
+labels**, which then build the encoder that the same validation fold is scored against. No assert in
+this repo would have caught it. `_pseudo_label_test()` is a separate function with fixed rounds and
+no `eval_set` for exactly that reason. In-pipeline strict twin at a lean smoke config:
+**0.945552 -> 0.945656, +0.000104, all five folds positive.**
+
+**Z7 -- the champion-recipe test is on Kaggle now**, three kernels on commit `c5e4771`: `PS0`
+(champion TEXbag recipe, `te_pseudo` off -- the strict-twin control fitted by the same code), `PS`
+(pass 1 at 400 rounds / lr 0.05, matching what Z5c-Z5e measured) and `PSR` (pass 1 at 1500 rounds /
+lr 0.02, to ask whether the gain is bounded by soft-label quality, since the pass-1 model in every
+measurement so far scores ~0.943 against the champion's 0.9461). **Gate: +0.0000949 OOF over PS0.**
+No slot is spent until that gate is cleared.
