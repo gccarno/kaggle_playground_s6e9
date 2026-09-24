@@ -2517,3 +2517,65 @@ source-offset finding in point 3 is the one genuinely new mechanism tonight prod
 reason no further public artifact should be admitted on the strength of its OOF alone. (4) The #1 at
 0.94945 (up from 0.94827) remains unexplained and un-chased. `experiments/runs.csv` rows:
 `e6db88da` (s1), `b0eaa810` (s2), `1184af71` (s3), `7c4cdc76` (s4), `44e81167` (s5, the anchor).
+
+### Phase 25 -- the public axis survives an exhaustive leg-level test; the slots turn to variance (2026-09-24)
+
+Phase 24 closed the public axis as "one bit" on the strength of 4 shares x 2 fold counts x 2
+combiners. That claim had a real hole in it: **every one of those blends used megayak's pre-made
+`ensemble` column as a single unit.** The six individual views A-F were never enumerated, najiama's
+V-series was never mixed with the 10-fold legs, and the 10-fold XGBoost twin was never loaded at
+all. megayak's own card says D and F add *despite being weaker* ("they see the data differently",
+F the loosest at 0.99761), which is exactly the case a library-level blend cannot express. So the
+axis was closed by extrapolation from five points, not by measurement.
+
+**It is now closed by measurement. 3,282 fixed `rank_mean` blends, 14 public legs, k = 1..4, three
+weights, zero slots.**
+
+| public leg | folds | solo OOF | | public leg | folds | solo OOF |
+|---|---|---|---|---|---|---|
+| `ENS` (megayak ensemble) | 10 | 0.946345 | | `V5` | **5** | 0.946170 |
+| `A` | 10 | 0.946281 | | `xgb5f` | **5** | 0.946142 |
+| `B` | 10 | 0.946258 | | `F` | 10 | 0.946134 |
+| `xgb10f` | 10 | 0.946243 | | `D` | 10 | 0.946077 |
+| `E` | 10 | 0.946230 | | `V6` | **5** | 0.946068 |
+| `C` | 10 | 0.946223 | | `V3` | **5** | 0.946064 |
+| `rmlp` | 10 | 0.946182 | | `V1` | **5** | 0.945866 |
+
+**The ceiling over all 3,282 is 0.946404** (`0.25 OURS + 0.75[B, D, rmlp, xgb10f]`). The blend we
+already shipped as Phase 24 slot 3 scores 0.946388. **Decomposing the library into its six views,
+adding a 10-fold XGBoost and four more LightGBM legs, and searching every subset up to size four
+buys +0.000016 OOF** -- one sixth of the shipping gate and less than half the 0.000038 seed-noise
+floor. Phase 24's "one bit" verdict survives the test that could have refuted it.
+
+**And OOF's preference is diagnostic rather than useful.** Every one of the top 25 blends is at
+`w = 0.25`, the heaviest public dose searched, and **24 of the top 25 contain no fold-honest leg at
+all.** Sorted by fold-honesty of the public side, the OOF ceiling falls monotonically:
+
+| public side | best OOF | vs champion |
+|---|---|---|
+| 0% fold-honest (`B+D+rmlp+xgb10f`) | 0.946404 | +0.000254 |
+| 50% (`ENS+rmlp+xgb5f+V5`) | 0.946388 | +0.000237 |
+| 75% (`rmlp+xgb5f+V5+V6`) | 0.946344 | +0.000194 |
+| 100% (`xgb5f+V5`) | 0.946304 | +0.000153 |
+
+That is the source offset of Phase 24 point 3 drawn as a curve: **our OOF pays for 10-fold content
+at about +0.00005 per quarter of the public side, and the board does not.** Two of tonight's slots
+are a matched pair on exactly this, at identical weight.
+
+**The ours-only side, measured free from the archive.** Playbook section 9's Final B is the
+*variance-reduced* twin -- the same idea with fitted machinery removed -- and it is chosen for that
+property, not its score. `TEXbag` (Phase 22, `seed_bag=3`) is that knob and has never been blended:
+
+| ours-only blend | OOF | vs Final A |
+|---|---|---|
+| `blend(TEX, TEXF)` = `61fb5598`, **today's Final A** | 0.946150 | -- |
+| `blend(TEXbag, TEXF)` | 0.946154 | +0.000004 |
+| `blend(TEX, TEXF, TEX2F)` | 0.946156 | +0.000006 |
+| **`blend(TEXbag, TEXF, TEX2F)`** | **0.946158** | **+0.000008** |
+
+All four are one score -- every gap is inside the seed floor, as three near-twins of the same recipe
+must be. The reason to prefer the last one is not the +0.000008: it is **three legs instead of two,
+one of them already averaged over three model seeds**, which is strictly less prediction variance
+for an unseen split at no measured cost. Per playbook section 9 you can only *select* what you
+*submitted*, and this has never been submitted -- which is what makes it worth a slot rather than a
+line in this file.
