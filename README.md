@@ -2895,9 +2895,78 @@ this repo would have caught it. `_pseudo_label_test()` is a separate function wi
 no `eval_set` for exactly that reason. In-pipeline strict twin at a lean smoke config:
 **0.945552 -> 0.945656, +0.000104, all five folds positive.**
 
-**Z7 -- the champion-recipe test is on Kaggle now**, three kernels on commit `c5e4771`: `PS0`
-(champion TEXbag recipe, `te_pseudo` off -- the strict-twin control fitted by the same code), `PS`
-(pass 1 at 400 rounds / lr 0.05, matching what Z5c-Z5e measured) and `PSR` (pass 1 at 1500 rounds /
-lr 0.02, to ask whether the gain is bounded by soft-label quality, since the pass-1 model in every
-measurement so far scores ~0.943 against the champion's 0.9461). **Gate: +0.0000949 OOF over PS0.**
-No slot is spent until that gate is cleared.
+**Z8 -- the mechanism iterates once, then saturates.** If a sharpened encoder makes a better model,
+that model makes better soft labels, which make a better encoder. Four rounds on the
+champion-shaped feature set, every soft-label-producing model trained on folds != f with fixed
+rounds and no `eval_set`:
+
+| round | OOF | vs r0 | step |
+|---|---|---|---|
+| r0 train-only | 0.944370 | -- | -- |
+| r1 one pass | 0.944704 | +0.000334 | +0.000334 |
+| **r2 iterated** | **0.944797** | **+0.000427** | +0.000094 |
+| r3 iterated x2 | 0.944803 | +0.000433 | +0.000005 |
+
+Round 2's step is +0.000094 -- essentially exactly the shipping gate -- and is positive in 5/5
+folds; round 3 is +0.000005 and mixed in sign. **Two rounds is the recipe, worth +0.000427.** (r1
+reproduced Z5e's +0.000334 to the digit, which is the harness confirming it is deterministic.)
+
+**Z7 -- and the champion recipe says NO. The mechanism is null where it would have had to ship.**
+Three kernels on commit `c5e4771`, the champion `TEXbag` recipe, 105 features, `seed_bag=3`:
+
+| run | recipe | OOF | vs PS0 |
+|---|---|---|---|
+| `TEXbag` (archived, older code) | -- | 0.946137 | -- |
+| **`PS0` `4d0614e8`** (control) | `te_pseudo` off | **0.946137** | **+0.000000** |
+| **`PS` `7eb59fd6`** | pass 1 at 400 rounds / lr 0.05 | **0.946139** | **+0.000002** |
+| **`PSR` `cdd1eec6`** | pass 1 at 1500 rounds / lr 0.02 | **0.946133** | **-0.000004** |
+
+**PS0 reproduces the archived `TEXbag` to six decimal places**, which is the control doing its job
+twice over: it confirms the `te_pseudo` commit leaves the default-off path bit-identical, and it
+gives PS and PSR a twin fitted by the same code rather than an older archive row. Against it, the
+pseudo-label mechanism is worth **+0.000002** -- one twentieth of the seed-noise floor -- and a
+stronger pass-1 model makes it **worse**, so the soft-label-quality axis is closed alongside it.
+**The +0.0000949 gate is not cleared, no slot was spent, and `te_pseudo` stays default-off.**
+
+**Why it died, and the methodological lesson, which is the durable part.** The gain was real and
+correctly characterised at every stage: +0.000430 lean, +0.000343 of it information rather than
+smoothing (the constant-prior control took only +0.000087 and the shuffled control went *negative*),
++0.000427 iterated, all five folds positive every time. What it was *not* is additive on top of the
+champion. The mechanism supplies one thing -- a lower-variance estimate of the per-value target rate
+-- and the champion already buys that thing four separate ways: the **window encoder** pooling each
+income value's neighbourhood at six radii (`te_window_cols`, radii 2/5/10/25/50/200), **two
+smoothings per column** (`te_multi_smooth: [10, "auto"]`, so 22 TE columns rather than 11), the eight
+multi-scale quantile-bucket encoders, and the digit decomposition. Z5d proved the soft labels carry
+information *about the per-value rate*; the champion is already saturated on exactly that target.
+
+This is README Phase 1b/1c's redundancy rule firing a **fourth** time, and harder than any previous
+instance -- but the new thing is a warning about how it was measured. Z5e was built as the
+redundancy test and its "champion-shaped" arm carried 11 TE columns at a single smoothing with no
+window encoder, no digit features and a 400-round model. **It measured a 28% shrink where the real
+champion produced a 99.5% shrink.** So:
+
+> **A lean stand-in can only UPPER-BOUND a representation gain, never estimate it.** Screening a
+> representation change on a partial replica of the champion is legitimate for deciding whether to
+> build the thing, and worthless for predicting what it will be worth once built. The ADD test has
+> to run on the actual champion config -- which is the same rule playbook section 6 already states
+> for ensemble legs ("judge by ADD and SWAP at constant pool size, never by solo score"), now
+> extended to representation changes.
+
+**A duplicate-archive artifact, the same class as Phases 18/19/20/22.** `PSR` appended twice,
+`cdd1eec6` and `c071f36c`, identical OOF and runtime (1741.1s) -- the original poller and a
+`--no-push` retry both archived the same kernel output. **De-duplicate on `run_tag` before any
+re-analysis of this phase.**
+
+**What stays open after Phase 26.** (1) The public axis: still nothing, unchanged from Phase 25.
+(2) Final A and Final B are unchanged -- `d8ef7c11` and `2e2c756d` -- and no candidate tonight came
+near displacing either. (3) The `id` axis, the original dataset, joint-key lookups and pseudo-label
+encoding are all now closed by measurement, with the original dataset closed on *mechanism* for the
+first time. (4) **The 0.94945 is no longer unexplained in kind, only in content.** Z3 prices it at an
+independent feature of ~1.0 log-odds SD -- as much signal as this repo found in 25 phases combined --
+and Z1/Z2/Z4/Z6 close every channel outside the 13 columns that we can reach. So it is either
+information we have no access to, or it is not generalisable signal; either way it is not reachable
+by search, and the remaining nights should not be spent searching for it. (5) The one increment
+`te_pseudo` never got: it augments `te_cols` only, not `te_window_cols`. Given Z7, extending it to
+the window encoder is expected to be null for the same reason and is **not** worth a kernel --
+recorded so it is not mistaken for an untried lead. `experiments/runs.csv` rows: `4d0614e8` (PS0),
+`7eb59fd6` (PS), `cdd1eec6`/`c071f36c` (PSR, duplicate pair). **Five slots remain unspent today.**
