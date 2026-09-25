@@ -240,7 +240,11 @@ def main():
         auc = roc_auc_score(y, stack_oof)
         print(f"  {args.mode} blend, equal weights, honest OOF {auc:.6f}"
               f"   vs equal-weight-probability champion {auc - a_champ:+.6f}")
-        label = f"{args.mode} blend, {len(names)} legs, equal weights"
+        # The leg ids go IN the label: submit_run.py matches Kaggle submissions to runs.csv
+        # rows by description, so a description shared by two blends of the same shape is
+        # unmatchable. See the refusal path in submit_run.py --fill-missing.
+        label = (f"{args.mode} blend, {len(names)} legs, equal weights ["
+                 + "+".join(n.split(":")[0] for n in names) + "]")
         coef = np.full(len(names), 1.0 / len(names))
 
     w = pd.DataFrame({"leg": [n.split(":")[0] for n in names], "learner": [n.split(":")[1] for n in names],

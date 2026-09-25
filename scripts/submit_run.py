@@ -38,9 +38,15 @@ def poll_score(description, timeout_min=20, poll_interval=20):
     cannot have its score attributed to this run."""
     deadline = time.time() + timeout_min * 60
     while time.time() < deadline:
-        for r in submissions_table():
-            if r.get("description", "").strip() != description.strip():
-                continue
+        hits = [r for r in submissions_table()
+                if r.get("description", "").strip() == description.strip()]
+        if len(hits) > 1:
+            # Same ambiguity as --fill-missing: a non-unique description means the first
+            # match is a guess, not an identification. Refuse rather than mis-attribute.
+            print(f"  WARNING: {len(hits)} submissions share this description; refusing to "
+                  f"attribute a score. Resolve by submission time.", file=sys.stderr)
+            return ""
+        for r in hits:
             s = r.get("publicScore") or r.get("public_score")
             if s not in (None, "", "None", "pending"):
                 return s
@@ -77,17 +83,44 @@ def main():
     runs = pd.read_csv(RUNS_CSV, dtype=str)
 
     if args.fill_missing:
-        table = {r.get("description", "").strip():
-                 (r.get("publicScore") or r.get("public_score")) for r in submissions_table()}
-        n = 0
-        for _, row in runs.iterrows():
-            if pd.notna(row.get("public_lb_score")) and str(row.get("public_lb_score")).strip():
+        # Matching is by submission DESCRIPTION, which is only safe when the description is
+        # unique on BOTH sides. It is not always: stack_logit.py used to emit a generic
+        # "rank_mean blend, 4 legs, equal weights" for every blend of that shape, and on
+        # 2026-09-25 this loop sprayed one score onto four rows sharing it -- two of which had
+        # never been submitted at all, inventing two false paired OOF<->LB points. A false
+        # paired point is worse than a missing one: refit_gap.py and every calibration claim
+        # in README section 4 are built on exactly these pairs. So ambiguity is now a REFUSAL,
+        # never a guess, and it names what to resolve by hand.
+        subs = submissions_table()
+        by_desc = {}
+        for r in subs:
+            by_desc.setdefault(r.get("description", "").strip(), []).append(
+                r.get("publicScore") or r.get("public_score"))
+        unscored = [row for _, row in runs.iterrows()
+                    if not (pd.notna(row.get("public_lb_score"))
+                            and str(row.get("public_lb_score")).strip())]
+        pending = {}
+        for row in unscored:
+            pending.setdefault(str(row["description"]).strip(), []).append(row["run_id"])
+        n = skipped = 0
+        for desc, run_ids in pending.items():
+            scores = [x for x in by_desc.get(desc, []) if x and x not in ("None", "pending")]
+            if not scores:
                 continue
-            s = table.get(str(row["description"]).strip())
-            if s and s not in ("None", "pending"):
-                write_score(row["run_id"], s)
-                n += 1
-        print(f"backfilled {n} score(s)")
+            if len(scores) > 1 or len(run_ids) > 1:
+                skipped += len(run_ids)
+                print(f"  REFUSING to fill an ambiguous match: {len(scores)} submission(s) and "
+                      f"{len(run_ids)} unscored run(s) share the description\n"
+                      f"    description: {desc!r}\n"
+                      f"    runs:        {', '.join(run_ids)}\n"
+                      f"    scores:      {', '.join(scores)}\n"
+                      f"    resolve by submission TIME with `kaggle competitions submissions "
+                      f"-c {COMPETITION}` and write each score with --message, or by hand.",
+                      file=sys.stderr)
+                continue
+            write_score(run_ids[0], scores[0])
+            n += 1
+        print(f"backfilled {n} score(s)" + (f"; {skipped} skipped as ambiguous" if skipped else ""))
         return
 
     if not args.run:

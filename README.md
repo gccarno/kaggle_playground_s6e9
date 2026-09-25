@@ -2970,3 +2970,155 @@ by search, and the remaining nights should not be spent searching for it. (5) Th
 the window encoder is expected to be null for the same reason and is **not** worth a kernel --
 recorded so it is not mistaken for an untried lead. `experiments/runs.csv` rows: `4d0614e8` (PS0),
 `7eb59fd6` (PS), `cdd1eec6`/`c071f36c` (PSR, duplicate pair). **Five slots remain unspent today.**
+
+### Phase 27 -- the diversity axis the finals never used; a new ours-only record, and te_pseudo vindicated on the board (2026-09-25)
+
+**Three probes closed the generator-fingerprint axis before any slot was spent.**
+
+**G1 -- the generator does not copy columns, and the clipping is in the SOURCE.** Z6 left the
+parent's other twelve features untested. Per-column exact-match rates between a child and its
+unique parent, against a chance baseline computed from the two marginals rather than assumed:
+`Range_Anxiety_Level` 0.7866 (chance 0.7755), `City_Type` 0.4981 (0.3773), `Home_Charging` 0.5794
+(0.5473), `Charging_Stations_Near_Work` 0.0866 (0.0637) -- **ratios 1.00 to 1.36, with a mean of
+4.08 of 12 columns matched.** That is income-conditional correlation, not descent: the columns with
+the highest ratios are the ones income predicts best, and `Environmental_Concern_Level` -- the
+dominant driver at single-feature AUC 0.844 -- sits at ratio **1.02**, so there is no denoised copy
+of the strongest column to be had. And the clipping lead died in the same run: the original's
+income minimum is **30000.0** and its commute minimum is **5.0**, with **zero rows below either**.
+**The clipping is in the source data, not introduced by the generator**, so there is no pre-clip
+value to recover -- README section 6's "clipped at" phrasing had implied otherwise.
+
+**G2 -- agreement DOES modulate the parent label, but not enough.** If descent is memorisation, a
+child matching its parent on 8 columns should inherit its label more strongly than one matching on
+2, and it does: the residual difference is flat below match 4 (-0.0012 to +0.0023, |z| < 1) and rises
+to **+0.0119 at match >= 7 (z = +2.57)** and **+0.0235 at match >= 8**, weighted slope +0.00113 per
+column. Phase 26's Z6b found this effect flat across *train support*; across *agreement* it is not.
+But the pre-registered gate demanded z >= 3 in a stratum holding >= 1% of test rows and the best
+available is z = +2.57 at 4.28%, so the gate is **not met**, and the ceiling is 0.000213-0.000701.
+
+**G3 -- and as features it is negative.** `par_label`, `par_match`, `par_lab_x_match`, `par_has`
+added to a lean recipe: **-0.000085, negative in all five folds.** Phase 26's own rule makes this
+decisive in the negative direction -- a lean stand-in *upper-bounds* a representation gain, so a
+negative upper bound cannot be positive on the champion. Four thin columns let the tree overfit,
+the same pattern as Phase 1's B7. **The parent axis is now closed three ways: additively (Z6b), as
+a modulated effect (G2), and as features (G3).**
+
+**G4 -- and then the actual finding: Final A had no decorrelation in it at all.** Final A is
+`rank_mean(TEXbag, TEXF, TEX2F)` and all three are lgb near-twins at rank-correlation
+**0.9997-0.9998**. Over an exhaustive enumeration of the 9 strongest ours-only legs at k = 3..5 --
+336 pools -- **Final A ranks 305th of 336.** Phase 25 adopted it on a variance argument worth
++0.000008 OOF; the argument was right and the instrument for it was the weakest available.
+
+Two diversity axes had never been inside a shipped ours-only final:
+
+| leg | family | solo OOF | corr vs pool | ADD | SWAP |
+|---|---|---|---|---|---|
+| **PS** (Phase 26 `te_pseudo`) | lgb | 0.946139 | **0.99858** | **+0.000047** | **+0.000051** |
+| **CatTEX** | cat | 0.946114 | 0.99766 | +0.000031 | +0.000032 |
+| **E4r0** | xgb | 0.945941 | 0.99604 | +0.000016 | +0.000010 |
+| TEX (a fourth near-twin, for contrast) | lgb | 0.946122 | 0.99960 | +0.000001 | -0.000005 |
+
+**PS is the one worth naming.** Phase 26 rejected `te_pseudo` as a champion *replacement* at
++0.000002 and closed it. As a *leg* it is the best single ADD and the best single SWAP in the
+archive. The mechanism was real all along -- it just belongs in the pool rather than in the recipe,
+and nothing in Phase 26's design could have seen that, because a replacement test and a diversity
+test ask different questions of the same artifact.
+
+On OOF the two axes are near-additive: representation +0.000047, family +0.000037, both +0.000077.
+
+**The five slots, every OOF verified against the plan to 6 dp before submission (commit `98f2c80`).**
+
+| slot | model | OOF | LB | pre-registered gate | verdict |
+|---|---|---|---|---|---|
+| 1 | `A_NEW` = `rank_mean(TEX2F, PS, CatTEX, E4r0)`, 3 families | 0.946235 | **0.94639** | >=0.94638 adopt; >=0.94642 score upgrade | **clears, not an upgrade** |
+| 2 | `A_LGB` = `rank_mean(TEXbag, TEXF, TEX2F, PS)`, lgb only | 0.946205 | **0.94642** | >=0.94638 => PS belongs in Final A | **CLEARS -- new Final A** |
+| 3 | `A_FAM` = current Final A + CatTEX + E4r0, no PS | 0.946195 | **0.94635** | read as slot2 - slot3 | **family offset confirmed** |
+| 4 | `B_NEW` = Final B recipe, ours side swapped only | 0.946397 | **0.94646** | >0.94646 new best | **ties, the wall holds** |
+| 5 | `PS` solo | 0.946139 | **0.94643** | -- (instrument point) | **new ours-only record** |
+
+**1. The decomposition is additive on the BOARD, not only on OOF, and that is what makes it
+readable.** Against the outgoing Final A's 0.94638:
+
+| arm | non-lgb share | contains PS | LB | vs Final A |
+|---|---|---|---|---|
+| slot 2 `A_LGB` | 0% | yes | 0.94642 | **+0.00004** |
+| slot 3 `A_FAM` | 40% | no | 0.94635 | **-0.00003** |
+| slot 1 `A_NEW` | 50% | yes | 0.94639 | **+0.00001** |
+
++0.00004 - 0.00003 = +0.00001, which is exactly what slot 1 scored. Two effects of opposite sign,
+separately pre-registered, each isolated in its own arm, summing correctly in the third.
+
+**2. Family diversity is REFUTED on the board, and it is refuted while its OOF rises.** Slot 3
+gained +0.000037 on OOF and **lost 0.00003 on the board**. Slots 2 and 3 sit 0.000010 apart on OOF
+and **0.00007 apart on the board**, in the direction the Phase 22 CatBoost offset predicts, with the
+prediction written down before the submission rather than after. This is the third independent
+confirmation, and it now has a default attached: **a non-lgb leg's OOF contribution is discounted
+before it counts, and cross-family pooling is not a route to a better Final A here.** The decorrelation
+is real -- corr 0.996-0.998 against the twins' 0.9998 -- and playbook section 7's rule holds anyway:
+disagreement that arrives with a family offset is not usable diversity.
+
+**3. `te_pseudo` carries a POSITIVE offset, which reverses Phase 26's verdict in the dimension
+Phase 26 could not see.** Slot 5 against its strict twin:
+
+| run | recipe | OOF | LB |
+|---|---|---|---|
+| `TEXbag` `50d84171` | champion | 0.946137 | 0.94636 |
+| **`PS` `7eb59fd6`** | champion + `te_pseudo` | 0.946139 | **0.94643** |
+| | | **+0.000002** | **+0.00007** |
+
+A strict one-field twin, +0.000002 on OOF, **+0.00007 on the board** -- about 2.6 sigma at the
+0.000027 near-twin paired resolution, so suggestive rather than decisive on its own. But it does not
+stand on its own: slot 2 independently gained +0.00004 on the board from adding PS to a pool. Two
+readings, different designs, same sign. **Every offset this repo has measured so far has been
+negative -- family (Phase 22), source (Phase 24), fold count (Phase 25). This is the first positive
+one**, and the mechanism is at least plausible: `te_pseudo`'s encoders are fitted with the test rows'
+own values folded in as soft-labelled support, so the representation is built partly *for the test
+distribution*, and our OOF has no way to be rewarded for that. It is the one thing measured here that
+OOF is structurally unable to price.
+
+**4. Both finals move.**
+
+- **Final A moves to `b6177d6b`**: ours-only `rank_mean(TEXbag, TEXF, TEX2F, PS)`, OOF 0.946205,
+  **LB 0.94642 -- +0.00004 over the outgoing `d8ef7c11`, the first ours-only gain since Phase 20.**
+  Chosen over slot 5's slightly higher 0.94643 because the two are inside near-twin resolution and
+  `b6177d6b` is a four-leg blend against a single model -- playbook section 9's rule, the same one
+  Phase 25 used, and the first time in this competition it has been applied where the scores were not
+  already tied.
+- **Final B moves to `03d73b32`**: OOF 0.946397, **LB 0.94646 -- tying the outgoing `2e2c756d`
+  exactly**, with an ours side that is a better model. Adopted at zero score cost, exactly as Phase 25
+  promoted `2e2c756d`. Its ours side is `A_NEW`, which carries the family offset slot 3 just measured,
+  so **a Final B rebuilt over `A_LGB` should be >= this and is the first slot of the next session.**
+
+**5. The 0.94646 wall holds a sixth time.** Slot 4 improved the ours side and scored 0.94646, the
+same as Phase 23 slot 3, Phase 24 slot 3, and Phase 25 slots 2/4/5 -- now across six compositions and
+two different ours sides. Nothing on our side reaches the board through a 34% weight.
+
+**A DATA-INTEGRITY INCIDENT, and it is the most important thing in this phase to carry forward.**
+`submit_run.py --fill-missing` matches Kaggle submissions to `runs.csv` rows **by submission
+description**, and `stack_logit.py` emitted a generic one -- `"rank_mean blend, 4 legs, equal
+weights"` -- for every blend of that shape. The backfill keyed a dict by description, collapsed the
+duplicates, and **wrote one score onto four rows, two of which (`e42a338b`, `7957be25`) had never
+been submitted at all.** It also silently skipped slot 5 and mis-assigned slot 2 (0.94639 for its
+true 0.94642). Caught because slot 5 was missing and two unfamiliar run_ids appeared; the five true
+scores were then recovered by matching **submission timestamps** against the order the slots were
+submitted in, and verified against `kaggle competitions submissions` directly.
+
+**A fabricated paired point is worse than a missing one.** `refit_gap.py`, the OOF->LB slope, the
+residual sigma and the shipping gate in section 4 are all built from exactly these pairs, and two
+invented ones at OOF 0.9457 with a 0.94639 label would have bent the low end of every future refit.
+Both fixed:
+
+- `submit_run.py` now **refuses** an ambiguous match instead of guessing, on both the `--fill-missing`
+  path and the `poll_score` path, printing the run_ids, the candidate scores and how to resolve them
+  by submission time. Verified: re-running it now declines the `e42a338b`/`7957be25` group rather than
+  filling it.
+- `stack_logit.py` now writes the leg ids **into** the description, so a blend is self-identifying and
+  the collision cannot form.
+
+**What stays open.** (1) A Final B rebuilt over `A_LGB` rather than `A_NEW` -- the one candidate this
+phase's own results point at and did not have a slot left for. (2) Whether the positive `te_pseudo`
+offset survives a second paired point; at 2.6 sigma it is worth one more, and it is the only offset
+measured here with a sign that favours us. (3) Cross-family pooling is closed by slot 3. (4) The
+generator-fingerprint axis is closed by G1/G2/G3. (5) Phase 26's Z3 pricing of the 0.94945 gap stands
+and nothing here touches it. `experiments/runs.csv` rows: `3656ddbe` (s1), `b6177d6b` (s2,
+**Final A**), `bd1bbc86` (s3), `03d73b32` (s4, **Final B**), `7eb59fd6` (s5).
