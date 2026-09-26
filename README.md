@@ -3127,4 +3127,56 @@ offset survives a second paired point; at 2.6 sigma it is worth one more, and it
 measured here with a sign that favours us. (3) Cross-family pooling is closed by slot 3. (4) The
 generator-fingerprint axis is closed by G1/G2/G3. (5) Phase 26's Z3 pricing of the 0.94945 gap stands
 and nothing here touches it. `experiments/runs.csv` rows: `3656ddbe` (s1), `b6177d6b` (s2,
-**Final A**), `bd1bbc86` (s3), `03d73b32` (s4, **Final B**), `7eb59fd6` (s5).
+
+
+### Phase 28 -- pre-registration: closing FINDINGS.md section 7.5's priority list (2026-09-25/26)
+
+FINDINGS.md section 7.5 named two specific next actions and left the rest as "burn the remaining
+slots on paired points, not searches." Tonight does both, plus one candidate the priority list
+implied but did not spell out.
+
+**Z1 -- rebuild Final B over `A_LGB` instead of `A_NEW`.** Final B (`03d73b32`) uses `A_NEW`
+(`3656ddbe`, the 3-family pool) as its ours side. Phase 27 slot 3 measured that cross-family
+pooling *costs* board score at higher OOF (-0.00003 at matched structure), so Final B's ours side is
+carrying that same discount today. `A_LGB` (`b6177d6b`, the current Final A: `TEXbag+TEXF+TEX2F+PS`,
+all lgb) is the version of the ours side without it. This is a single-field twin of the shipped
+Final B -- same public legs, same weight, same combiner, only the ours-side run_id changes.
+GATE: >=0.94646 (tie or beat the outgoing Final B) confirms the family-offset finding transfers
+through a 34%-weight public blend; <0.94646 means the discount does not survive dilution.
+
+**Z2/Z3 -- a second AND third independent paired point on the `te_pseudo` offset.** Phase 27 found
+`PS` (TEXbag + `te_pseudo`) at +0.000002 OOF but **+0.00007 LB** against its strict twin `TEXbag` --
+suggestive at ~2.6 sigma (near-twin paired resolution 0.000027), and the only OOF->LB offset
+measured in this competition with a POSITIVE sign. FINDINGS.md section 7.5 flagged it as worth one
+more point; tonight buys two, on the two other champion-family backbones, so the same mechanism is
+tested on three independent recipes rather than resubmitted once:
+
+- `PSF` = `TEXF` (`1b80818a`, OOF 0.946125 -> LB 0.94637) + `te_pseudo` (pass1 400 rounds / lr 0.05,
+  identical to `PS`'s pass-1 config). Differs from `TEXF` ONLY in the four `te_pseudo*` fields.
+- `PS2F` = `TEX2F` (`f0ba7251`, OOF 0.946124 -> LB 0.94636) + `te_pseudo`, same pass-1 config.
+  Differs from `TEX2F` ONLY in the four `te_pseudo*` fields.
+
+GATE, applied per-arm against its own strict twin: LB delta > 0 on both replicates upgrades the
+offset from "suggestive" to "established" (three independent draws, same sign, same rough
+magnitude); a mixed sign on even one arm means Phase 27's PS/TEXbag pair was itself noise at the
+2.6-sigma level it always could have been, and the offset returns to "unconfirmed."
+
+**Z4/Z5 -- the two candidate pool constructions the offset implies, IF it replicates.** Built after
+Z2/Z3 return, so their OOF is verified against the actual pass-1 fits rather than assumed:
+
+- `ALLPS` = `rank_mean(PS, PSF, PS2F)` -- three `te_pseudo`-augmented backbones, no plain twins.
+  Each backbone's pass-1 model is fit independently, so if `te_pseudo` adds real per-backbone
+  variation on top of the recipe correlation the three plain twins already share, this pool should
+  be MORE decorrelated than `A_LGB`'s three plain twins (rank-corr 0.9997-0.9998) while keeping
+  every leg's positive offset. A new Final-A candidate if so.
+- `A_LGB2` = `rank_mean(TEXbag, TEXF, TEX2F, PS, PSF, PS2F)` -- the plain twins AND the pseudo
+  twins together, six legs. Tests whether the plain twins still buy variance reduction on top of
+  the pseudo effect, or whether they are now redundant with legs that dominate them in expectation.
+
+No gate is pre-set for Z4/Z5 beyond the standing rule: adopt as a new Final A only if it beats
+`A_LGB`'s 0.94642 by more than the 0.000027 near-twin resolution, or ties it while adding legs
+(the variance argument Phase 25 and Phase 27 both used).
+
+Five slots: Z1 (instant, public_blend.py), Z2, Z3 (Kaggle CPU kernels, fanned in parallel), Z4, Z5
+(instant once Z2/Z3's OOF is known). Every OOF verified against the plan to 6dp before submission,
+per standing practice.**Final A**), `bd1bbc86` (s3), `03d73b32` (s4, **Final B**), `7eb59fd6` (s5).
