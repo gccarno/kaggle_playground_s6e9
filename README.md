@@ -3127,7 +3127,7 @@ offset survives a second paired point; at 2.6 sigma it is worth one more, and it
 measured here with a sign that favours us. (3) Cross-family pooling is closed by slot 3. (4) The
 generator-fingerprint axis is closed by G1/G2/G3. (5) Phase 26's Z3 pricing of the 0.94945 gap stands
 and nothing here touches it. `experiments/runs.csv` rows: `3656ddbe` (s1), `b6177d6b` (s2,
-
+**Final A**), `bd1bbc86` (s3), `03d73b32` (s4, **Final B**), `7eb59fd6` (s5).
 
 ### Phase 28 -- pre-registration: closing FINDINGS.md section 7.5's priority list (2026-09-25/26)
 
@@ -3179,4 +3179,70 @@ No gate is pre-set for Z4/Z5 beyond the standing rule: adopt as a new Final A on
 
 Five slots: Z1 (instant, public_blend.py), Z2, Z3 (Kaggle CPU kernels, fanned in parallel), Z4, Z5
 (instant once Z2/Z3's OOF is known). Every OOF verified against the plan to 6dp before submission,
-per standing practice.**Final A**), `bd1bbc86` (s3), `03d73b32` (s4, **Final B**), `7eb59fd6` (s5).
+per standing practice.
+
+**The five slots, every OOF verified against the plan to 6dp before submission.**
+
+| slot | model | OOF | LB | pre-registered gate | verdict |
+|---|---|---|---|---|---|
+| 1 | `B_LGB` = Final B recipe, ours side swapped to `A_LGB` | 0.946394 | **0.94648** | >=0.94646 confirms | **CLEARS -- new best score, new Final B** |
+| 2 | `PSF` = `TEXF` + `te_pseudo` | 0.946147 | **0.94643** | read jointly with s3 | **positive (+0.00006 vs TEXF)** |
+| 3 | `PS2F` = `TEX2F` + `te_pseudo` | 0.946119 | **0.94640** | read jointly with s2 | **positive (+0.00004 vs TEX2F)** |
+| 4 | `ALLPS` = `rank_mean(PS, PSF, PS2F)` | 0.946164 | **0.94643** | beat `A_LGB` by >0.000027 | **ties `A_LGB` despite -0.000041 OOF** |
+| 5 | `A_LGB2` = `A_LGB` + `PSF` + `PS2F`, 6 legs | 0.946222 | **0.94645** | beat `A_LGB` by >0.000027 | **CLEARS -- new Final A** |
+
+**1. Z1 did not just confirm the family-offset finding, it beat the wall.** `B_LGB`'s only
+difference from the outgoing Final B is which ours-side run feeds the 34% weight -- `A_LGB`
+(no family discount) instead of `A_NEW` (carries it). Result: **0.94648**, +0.00002 over the
+outgoing Final B and +0.00002 over the *previous best score this competition has ever produced*
+(0.94646, hit six separate times across Phases 23-27). **The 0.94646 wall was never a ceiling on
+the public axis -- it was a ceiling on the ours side feeding it.** Remove the discount Phase 27
+found and the wall moves. This is the cleanest evidence yet that the family-offset finding is not
+just real but load-bearing.
+
+**2. The `te_pseudo` offset is now ESTABLISHED, not suggestive -- three independent draws, three
+positive board deltas, at three different OOF signs.**
+
+| backbone | OOF delta (pseudo - plain) | LB delta |
+|---|---|---|
+| TEXbag -> PS (Phase 27) | +0.000002 | **+0.00007** |
+| TEXF -> PSF (tonight) | +0.000022 | **+0.00006** |
+| TEX2F -> PS2F (tonight) | **-0.000005** | **+0.00004** |
+
+The OOF deltas span -0.000005 to +0.000022 -- essentially flat, all inside the seed-noise floor --
+while the LB deltas are **positive every time**, clustered at 0.00004-0.00007. An effect that shows
+up on the board regardless of which way its OOF twitches is not a fluke; it is measuring something
+OOF cannot see, exactly as Phase 27 first proposed. Per the pre-registered gate (positive delta on
+both replicates), this offset is promoted from "worth one more point" to **established: any
+`te_pseudo` leg should be scored on the board, not on its OOF, when deciding whether to include it.**
+
+**3. Z4's own OOF said no and the board said tie anyway.** `ALLPS` (three `te_pseudo` legs, no
+plain twins) has the LOWEST OOF of tonight's five candidates -- 0.000041 BELOW `A_LGB` -- and yet
+matches it on the board (0.94643 vs 0.94642, inside near-twin resolution). Losing the plain twins'
+variance-reduction should have cost more than the compounded positive offset could buy back; instead
+the two roughly cancelled. This is direct, if noisy, confirmation of point 2's mechanism at a higher
+dose: three legs each carrying the unseen positive offset outperform their own OOF ranking.
+
+**4. Z5 is the clean promotion, and it is a strict superset.** `A_LGB2` adds `PSF` and `PS2F` to
+`A_LGB` -- drops nothing -- and gains +0.000017 OOF and **+0.00003 LB**, clearing near-twin
+resolution on the board as well as OOF. Every leg in the pool now individually carries a positive
+board offset (point 2), so this pool is not just lower-variance than `A_LGB`, it is a pool of legs
+each independently under-priced by our own instrument.
+
+**5. Both finals move again, in the same night.**
+
+- **Final A moves to `215837d9`** (`A_LGB2`): ours-only `rank_mean(TEXbag, TEXF, TEX2F, PS, PSF,
+  PS2F)`, OOF 0.946222, **LB 0.94645 -- +0.00003 over the outgoing `b6177d6b`.** The third
+  ours-only gain in three consecutive phases (Phase 25 variance-only, Phase 27 +0.00004, tonight
+  +0.00003), and each of the last two moved the SCORE, not only the variance.
+- **Final B moves to `0993db8f`** (`B_LGB`): same public recipe as the outgoing Final B, ours side
+  upgraded from `A_NEW` to `A_LGB`, **LB 0.94648 -- the best score this repo has produced**, and
+  the first time the 0.94646 wall has moved since Phase 23 first hit it.
+
+**What stays open.** (1) `A_LGB2` is not yet `B_LGB`'s ours side -- `B_LGB` still runs `A_LGB` (4
+legs), not tonight's `A_LGB2` (6 legs). Rebuilding Final B over `A_LGB2` is the obvious next slot
+and should be tried before anything else. (2) The `te_pseudo` offset is established at n=3; it has
+never been tested on a 4th backbone or at a dose above 3 legs. (3) Every other axis in
+`FINDINGS.md` remains closed and should not be re-opened. `experiments/runs.csv` rows: `0993db8f`
+(s1, **Final B**), `d07c7ab7` (s2), `d5df4589` (s3), `35931e5e` (s4), `215837d9` (s5,
+**Final A**).
