@@ -5,6 +5,12 @@ decisions live here. They are not up for renegotiation mid-competition. Read thi
 model. `KAGGLE_PLAYBOOK.md` is the method document carried over from S6E7 and S6E8;
 `CLAUDE.md` is the orientation for a fresh agent session.
 
+**`FINDINGS.md` is the overview layer over this file** — every axis tried with its verdict, the five
+measured OOF→LB offsets, the two methodological lessons that cost the most to learn, and the
+procedure for choosing the two final submissions. Start there if you are coming back cold; it indexes
+into §8's phase log rather than restating it. It summarises, so where the two disagree, **this file
+wins.**
+
 ---
 
 ## 1. The competition

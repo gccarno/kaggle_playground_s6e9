@@ -13,6 +13,11 @@ environmental concern, scored on **ROC AUC**. 668,665 train rows, 286,571 test r
 measured numbers and the strategic decisions live there and are not up for renegotiation mid-
 competition. Read it before touching a model.
 
+**`FINDINGS.md`** is the overview layer over `README.md` — every axis tried with its verdict, the
+five measured OOF→LB offsets, and the final-two-submissions decision procedure. Read it first to
+orient, then use its §8 index to jump into `README.md`'s phase log for the numbers. It summarises,
+so `README.md` wins wherever they disagree.
+
 **`KAGGLE_PLAYBOOK.md`** is the method document, distilled from two prior runs — S6E7 (rank 120,
 +298 places in the shakeup) and S6E8 (private 0.97030, rank 675/3,532, +6 places). Its thesis:
 build the measuring instrument first, and trust it all the way to its conclusion — including when it
