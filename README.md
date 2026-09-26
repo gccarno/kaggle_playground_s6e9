@@ -3246,3 +3246,25 @@ never been tested on a 4th backbone or at a dose above 3 legs. (3) Every other a
 `FINDINGS.md` remains closed and should not be re-opened. `experiments/runs.csv` rows: `0993db8f`
 (s1, **Final B**), `d07c7ab7` (s2), `d5df4589` (s3), `35931e5e` (s4), `215837d9` (s5,
 **Final A**).
+
+### Phase 29 -- pre-registration: Final B over A_LGB2, the te_pseudo offset at n=5, and the ours weight (2026-09-26)
+
+Phase 28's "what stays open" named two items; tonight closes both and adds the one probe the
+established `te_pseudo` offset implies. Every other axis in FINDINGS.md section 7.5 point 4 stays closed.
+
+| slot | name | recipe | twin / baseline | OOF (pre-computed) | pre-registered gate |
+|---|---|---|---|---|---|
+| 1 | `B_LGB2` | Final B recipe (rank_mean, public `6view+rmlp+xgb5f+lgbV5` at 0.66), ours side `b6177d6b` -> `215837d9` (`A_LGB2`) | single-field twin of Final B `0993db8f` (0.946394 / 0.94648) | **0.946405** | >=0.94648 -> new Final B (a tie adopts on the variance rule: its ours side is a strict superset); <0.94648 -> the ours-side gain does not survive 34% dilution |
+| 2 | `PS2` | `TEX2` + `te_pseudo` (4th backbone) | strict twin `TEX2` `c924bc0a` (0.946109 / 0.94635); merged-config diff = `te_pseudo` only | kernel | LB delta > 0 -> offset at n=4; <= 0 -> first counter-example, offset downgraded to "usually" and the leg stays out of slot 4 |
+| 3 | `PSWA` | `TXWA` + `te_pseudo` (5th backbone) | strict twin `TXWA` `98f5bf60` (0.946099 / 0.94636); merged-config diff = `te_pseudo` only | kernel | as slot 2, read jointly |
+| 4 | `A_LGB3` | `A_LGB2` + whichever of `PS2`/`PSWA` return (8 lgb legs, strict superset) | Final A `215837d9` (0.946222 / 0.94645) | after 2/3 | >=0.94648 -> new Final A; 0.94645-0.94647 -> adopt on variance only if the added legs are pseudo legs; lower -> keep `A_LGB2` |
+| 5 | `B_LGB2w50` | slot 1 with `--ours-weight 0.50` | single-field twin of slot 1 | **0.946387** (-0.000018 vs slot 1) | beats slot 1 by >=0.00003 -> OOF under-prices our side inside the blend too, adopt as Final B; tie or below -> 0.34 stands |
+
+**Slot 5's hypothesis, stated before the run.** Every leg of `A_LGB2` carries the positive
+`te_pseudo` board offset or is a plain twin pooled with one, and the 0.34 weight was chosen on OOF,
+which cannot see that offset. If the offset is real inside a blend, the board should prefer a higher
+ours weight *even though OOF prefers 0.34* (weight curve on OOF: 0.34 0.946405, 0.50 0.946387,
+0.65 0.946354). A tie or loss means the public legs' decorrelation dominates and the weight axis closes.
+
+The Final B preview reproduced `0993db8f`'s OOF (0.946394) exactly from the archived artifacts before
+any of these numbers were written down.
