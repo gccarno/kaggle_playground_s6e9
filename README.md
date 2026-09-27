@@ -3268,3 +3268,48 @@ ours weight *even though OOF prefers 0.34* (weight curve on OOF: 0.34 0.946405, 
 
 The Final B preview reproduced `0993db8f`'s OOF (0.946394) exactly from the archived artifacts before
 any of these numbers were written down.
+
+**The five slots, every blend OOF pre-computed and matched to 6dp before submission.**
+
+| slot | model | run_id | OOF | LB | gate | verdict |
+|---|---|---|---|---|---|---|
+| 1 | `B_LGB2` = Final B over `A_LGB2` at 0.34 | `63126d9f` | 0.946405 | **0.94649** | >=0.94648 | **CLEARS -- new best score, new Final B** |
+| 2 | `PS2` = `TEX2` + `te_pseudo` | `62ad10de` | 0.946105 | **0.94642** | delta > 0 vs `TEX2` 0.94635 | **+0.00007** |
+| 3 | `PSWA` = `TXWA` + `te_pseudo` | `f8b9c9d1` | 0.946116 | **0.94643** | delta > 0 vs `TXWA` 0.94636 | **+0.00007** |
+| 4 | `A_LGB3` = `A_LGB2` + `PS2` + `PSWA`, 8 lgb legs | `b972178b` | 0.946217 | **0.94645** | tie band 0.94645-0.94647 -> adopt on variance | **ties -- adopted as new Final A** |
+| 5 | `B_LGB2w50` = slot 1 at ours weight 0.50 | `b4631630` | 0.946387 | **0.94650** | beat slot 1 by >=0.00003 | **+0.00001, a tie -- 0.34 stands** |
+
+**1. The `te_pseudo` offset is now five for five.** Five independent backbones, five positive board
+deltas, clustered at +0.00004 to +0.00007, at OOF deltas that span -0.000005 to +0.000022:
+
+| backbone | OOF delta | LB delta |
+|---|---|---|
+| TEXbag -> PS | +0.000002 | +0.00007 |
+| TEXF -> PSF | +0.000022 | +0.00006 |
+| TEX2F -> PS2F | -0.000005 | +0.00004 |
+| **TEX2 -> PS2** | **-0.000004** | **+0.00007** |
+| **TXWA -> PSWA** | **+0.000017** | **+0.00007** |
+
+Mean board delta +0.000062 against a mean OOF delta of +0.000006. Under a null of zero effect with
+the 0.000027 near-twin paired SD, five same-sign draws of this size are not a coincidence.
+
+**2. Final B moves on the ours side a second night running.** Swapping `A_LGB` -> `A_LGB2` inside
+the 34% weight gained +0.00001 on the board at +0.000011 OOF: small, but the same direction as
+Phase 28's +0.00002, and it is a strict improvement of the ours side, so it is adopted.
+
+**3. The weight probe leaned the predicted way and did not clear.** At 0.50 the OOF fell 0.000018 and
+the board rose 0.00001 -- the direction the offset predicts, at a size below near-twin resolution.
+Per the gate, 0.34 stands. One bracket point (0.65) settles it; if that also rises, the weight
+trend is real and Final B should move to it.
+
+**4. A_LGB3 is a variance adoption, not a score gain.** Rank-corr against `A_LGB2` is 0.99996 -- the
+two added legs barely change the ranking -- and the board tied. Adopted under the pre-registered
+rule because both added legs individually cleared their twin gates (every pseudo leg in the pool is
+under-priced by OOF), and the pool is a strict superset.
+
+**Finals after Phase 29:** Final A `b972178b` (ours-only, 8 lgb legs, 0.94645); Final B `63126d9f`
+(public-mixed, ours side `A_LGB2` at 0.34, **0.94649**). Slot 5 `b4631630` (0.94650) is selectable
+and is the Final B alternative if the 0.65 bracket confirms the weight trend.
+
+**Quota note.** Slots 1 and 5 were submitted at 23:56-23:57 UTC on 09-26; slots 2-4 at 00:11-00:15 UTC
+on 09-27, so they count against the 27th's five if the reset is at UTC midnight.

@@ -99,8 +99,8 @@ Two limits on the instrument that cost real effort to learn:
 |---|---|---|
 | Phase 0 raw-feature LightGBM baseline | 0.941660 | 0.94149 |
 | Best single model (`PSF`, `d07c7ab7`) | 0.946147 | 0.94643 |
-| **Final A** — ours-only (`215837d9`) | 0.946222 | **0.94645** |
-| **Final B** — public-mixed (`0993db8f`) | 0.946394 | **0.94648** |
+| **Final A** — ours-only (`b972178b`) | 0.946217 | **0.94645** |
+| **Final B** — public-mixed (`63126d9f`) | 0.946405 | **0.94649** |
 | #2 on the board | — | 0.94676 |
 | **#1 on the board (Team Alicia)** | — | **0.94945** |
 
@@ -267,7 +267,7 @@ from*. Five instances, each measured independently:
 | **Source** | ≈ **−0.0001** | an OOF produced by a pipeline we did not calibrate (someone else's public artifact) sits on a *lower* line than ours | Phase 24 |
 | **Fold count** | ≈ **−0.000114** for a 5→10 fold step | a 10-fold OOF is optimistic against a 5-fold-calibrated line | Phase 25 |
 | `fe_recipe_score` | ≈ −0.00018 | a specific feature block that cost board score at zero OOF cost | Phase 17, 18 |
-| **Representation (`te_pseudo`)** | **+0.00004 to +0.00007** at matched OOF | **the first POSITIVE one, now established at n=3** — encoders fitted with test-row support are built partly *for the test distribution*, which OOF has no way to reward | Phase 27, confirmed 3× Phase 28 |
+| **Representation (`te_pseudo`)** | **+0.00004 to +0.00007** at matched OOF | **the first POSITIVE one, now 5 for 5** — encoders fitted with test-row support are built partly *for the test distribution*, which OOF has no way to reward | Phase 27, 28, 29 |
 
 **The `te_pseudo` offset went from suggestive to established in one night.** Three independent
 backbones, three positive board deltas, at OOF deltas that were themselves flat or even negative:
@@ -277,6 +277,8 @@ backbones, three positive board deltas, at OOF deltas that were themselves flat 
 | TEXbag → PS | +0.000002 | +0.00007 |
 | TEXF → PSF | +0.000022 | +0.00006 |
 | TEX2F → PS2F | **−0.000005** | +0.00004 |
+| TEX2 → PS2 (Phase 29) | −0.000004 | +0.00007 |
+| TXWA → PSWA (Phase 29) | +0.000017 | +0.00007 |
 
 An effect that lands on the same side of zero on the board regardless of which way its OOF twitches
 is not noise — it is a leg property, and any `te_pseudo` leg should now be scored by that expectation
@@ -352,15 +354,14 @@ is not selectable.** That is what makes the hedge enforceable rather than rememb
 
 | | run_id | recipe | OOF | public LB |
 |---|---|---|---|---|
-| **Final A** | **`215837d9`** | ours-only `rank_mean(TEXbag, TEXF, TEX2F, PS, PSF, PS2F)` — 6 lgb legs | 0.946222 | **0.94645** |
-| **Final B** | **`0993db8f`** | `rank_mean(A_LGB × 0.34 + [6view, rmlp, xgb5f, lgbV5] × 0.66)` | 0.946394 | **0.94648** |
+| **Final A** | **`b972178b`** | ours-only `rank_mean` of 8 lgb legs: `TEXbag, TEXF, TEX2F, PS, PSF, PS2F, PS2, PSWA` | 0.946217 | **0.94645** |
+| **Final B** | **`63126d9f`** | `rank_mean(A_LGB2 × 0.34 + [6view, rmlp, xgb5f, lgbV5] × 0.66)` | 0.946405 | **0.94649** |
+| B alternative | `b4631630` | same as Final B at ours weight 0.50 | 0.946387 | 0.94650 |
 
-Why Final A is this and not the single best solo score (`PSF` at 0.94643): the six-leg pool is a
-**strict superset** of the previous Final A (adds legs, drops none) and beats it outright on the
-board (+0.00003, clearing near-twin resolution) — not just a variance-only tie this time.
-
-Final B's ours side is `A_LGB` (4 legs: `TEXbag, TEXF, TEX2F, PS`), **not** the 6-leg `A_LGB2` that
-now feeds Final A — that swap is untried and is priority 1 below.
+Final A (`A_LGB3`, Phase 29) ties the 6-leg `A_LGB2` on the board and is adopted on the variance
+rule: strict superset, rank-corr 0.99996, and both added legs cleared their own twin gates. Final B
+moved +0.00001 by swapping its ours side to `A_LGB2`. The weight-0.50 variant scored 0.00001 higher
+still, below near-twin resolution, so it is held as the alternative pending one bracket point (0.65).
 
 ### 7.4 The decision rule
 
@@ -383,24 +384,17 @@ Apply in order:
 5. **You can only select what you submitted.** An unsubmitted candidate, however good its OOF, is not
    selectable. This is why slots get burned rather than hoarded.
 
-### 7.5 What to do with the remaining slots (~20, four nights)
+### 7.5 What to do with the remaining slots (three nights after Phase 29)
 
-Phase 28 closed both items this list used to lead with. In priority order now:
-
-1. **Rebuild Final B over `A_LGB2` instead of `A_LGB`.** Final B (`0993db8f`) still runs the 4-leg
-   `A_LGB` as its ours side; Final A has since moved to the 6-leg `A_LGB2` (`215837d9`), which beats
-   `A_LGB` outright on the board. This swap is a single-field twin of the current Final B and is the
-   one candidate the evidence directly points at. *Do this first.*
-2. **Push the `te_pseudo` offset to a 4th backbone or a higher dose.** Established at n=3 (§5); it
-   has never been tried on a fourth recipe, nor combined with `CatTEX`/`E4r0` now that its per-leg
-   board value is known to exceed its OOF signal.
-3. **Burn the rest on paired points in the rich OOF band.** 5/day, no rollover; an unspent slot is a
-   paired point thrown away. S6E8 used 18 of ~290 available and paid for it by over-reading four of
-   them.
-4. **Do not** spend a slot on the public axis's own *composition* (§4.6, saturated at k≤4 over 14
-   legs), on cross-family pooling (§5), on the generator/parent axis (§4.2, closed three ways), or on
-   chasing #1 (§4.8, priced at more signal than we have ever found). The ours side feeding the public
-   blend is not in that list — Phase 28 just showed it still moves.
+1. **Bracket the ours weight in Final B: 0.65.** Phase 29 read 0.34 → 0.94649, 0.50 → 0.94650. If
+   0.65 ≥ 0.94651 the trend is real and Final B moves to the best weight; if it falls, 0.34 stands and
+   the axis is closed.
+2. **Final B over `A_LGB3`** at whichever weight wins. Expect a tie (corr 0.99996); submit only so it
+   is selectable.
+3. **Burn the rest on paired points in the rich OOF band**, e.g. further `te_pseudo` backbones
+   (`TEXC`, `TEX`) as instrument points. Each has been +0.00004–0.00007 on the board five times out of five.
+4. **Do not** spend a slot on the public axis's own *composition* (§4.6), on cross-family pooling
+   (§5), on the generator/parent axis (§4.2), or on chasing #1 (§4.8).
 
 ### 7.6 Pre-deadline checklist
 
@@ -441,7 +435,8 @@ Phase 28 closed both items this list used to lead with. In priority order now:
 | **The gap to #1 priced** | Phase 26 Z3 |
 | Pseudo-label encoders, with the controls that make them readable | Phase 26 Z5–Z8, Phase 27 |
 | The diversity decomposition that first moved the finals | Phase 27 |
-| **The `te_pseudo` offset established at n=3, and the current finals** | Phase 28 |
+| **The `te_pseudo` offset established at n=3** | Phase 28 |
+| **The offset at 5/5, the ours-weight probe, and the current finals** | Phase 29 |
 
 Useful tools:
 
