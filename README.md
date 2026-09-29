@@ -3349,3 +3349,22 @@ as the ours weight rises (0.946409 -> 0.946391 -> 0.946357), while the board is 
 0.50. That is the direction the `te_pseudo` offset predicts, but its size is below near-twin
 resolution. 0.50 is adopted because it is the peak on both curves, and it also halves the
 public-artifact exposure of Final B relative to 0.34, which is the risk the hedge exists for.
+
+**Results, slots 5, 7-9 (09-29 quota):**
+
+| slot | run_id | OOF | LB | verdict |
+|---|---|---|---|---|
+| 5 `PSC` | `207bd9ad` | 0.946105 (+0.000004 vs `TEXC`) | **0.94640** | **+0.00005 -- clears; offset n=6** |
+| 7 `PSWC` | `383cbaae` | 0.946130 (+0.000019 vs `TXWC`) | **0.94640** | **+0.00005 -- clears; offset n=7** |
+| 8 `A_LGB4` = `A_LGB3` + PSC + PSWC, 10 lgb legs | `65554574` | 0.946212 | 0.94645 | ties -- **adopted as Final A on variance** |
+| 9 `B_LGB4w50` = `A_LGB4` x 0.50 + public x 0.50 | `37c8c37a` | 0.946393 | **0.94651** | ties slot 3 -- **adopted as Final B on variance** |
+
+**The `te_pseudo` offset is seven for seven.** Board deltas are +0.00007, +0.00006, +0.00004, +0.00007,
++0.00007, +0.00005 and +0.00005 (mean +0.000059), at OOF deltas between -0.000005 and +0.000022.
+
+**Finals after Phase 30, and the final selection.**
+- **Final A = `65554574`** (`A_LGB4`): ours-only rank_mean over 10 lgb legs, 0.94645. The manifest has
+  been checked, and it contains no public source.
+- **Final B = `37c8c37a`** (`B_LGB4w50`): `A_LGB4` x 0.50 plus `6view`/`rmlp`/`xgb5f`/`lgbV5` at
+  0.125 each, 0.94651. Every public leg's weight and fold count are in its manifest.
+- A-B public gap: 0.00006. The private paired SD is 0.000055, so the hedge still costs about 1 SD.

@@ -99,8 +99,8 @@ Two limits on the instrument that cost real effort to learn:
 |---|---|---|
 | Phase 0 raw-feature LightGBM baseline | 0.941660 | 0.94149 |
 | Best single model (`PSF`, `d07c7ab7`) | 0.946147 | 0.94643 |
-| **Final A** — ours-only (`b972178b`) | 0.946217 | **0.94645** |
-| **Final B** — public-mixed (`63126d9f`) | 0.946405 | **0.94649** |
+| **Final A** — ours-only (`65554574`) | 0.946212 | **0.94645** |
+| **Final B** — public-mixed (`37c8c37a`) | 0.946393 | **0.94651** |
 | #2 on the board | — | 0.94676 |
 | **#1 on the board (Team Alicia)** | — | **0.94945** |
 
@@ -267,7 +267,7 @@ from*. Five instances, each measured independently:
 | **Source** | ≈ **−0.0001** | an OOF produced by a pipeline we did not calibrate (someone else's public artifact) sits on a *lower* line than ours | Phase 24 |
 | **Fold count** | ≈ **−0.000114** for a 5→10 fold step | a 10-fold OOF is optimistic against a 5-fold-calibrated line | Phase 25 |
 | `fe_recipe_score` | ≈ −0.00018 | a specific feature block that cost board score at zero OOF cost | Phase 17, 18 |
-| **Representation (`te_pseudo`)** | **+0.00004 to +0.00007** at matched OOF | **the first POSITIVE one, now 5 for 5** — encoders fitted with test-row support are built partly *for the test distribution*, which OOF has no way to reward | Phase 27, 28, 29 |
+| **Representation (`te_pseudo`)** | **+0.00004 to +0.00007** at matched OOF | **the first POSITIVE one, now 7 for 7** — encoders fitted with test-row support are built partly *for the test distribution*, which OOF has no way to reward | Phase 27, 28, 29 |
 
 **The `te_pseudo` offset went from suggestive to established in one night.** Three independent
 backbones, three positive board deltas, at OOF deltas that were themselves flat or even negative:
@@ -279,6 +279,8 @@ backbones, three positive board deltas, at OOF deltas that were themselves flat 
 | TEX2F → PS2F | **−0.000005** | +0.00004 |
 | TEX2 → PS2 (Phase 29) | −0.000004 | +0.00007 |
 | TXWA → PSWA (Phase 29) | +0.000017 | +0.00007 |
+| TEXC → PSC (Phase 30) | +0.000004 | +0.00005 |
+| TXWC → PSWC (Phase 30) | +0.000019 | +0.00005 |
 
 An effect that lands on the same side of zero on the board regardless of which way its OOF twitches
 is not noise — it is a leg property, and any `te_pseudo` leg should now be scored by that expectation
@@ -350,18 +352,16 @@ is written by `scripts/public_blend.py`, which records the source dataset, per-l
 leg's fold count in `manifest.json`. **A candidate whose public content cannot be read back off disk
 is not selectable.** That is what makes the hedge enforceable rather than remembered approximately.
 
-### 7.3 The current two
+### 7.3 The final two (Phase 30)
 
 | | run_id | recipe | OOF | public LB |
 |---|---|---|---|---|
-| **Final A** | **`b972178b`** | ours-only `rank_mean` of 8 lgb legs: `TEXbag, TEXF, TEX2F, PS, PSF, PS2F, PS2, PSWA` | 0.946217 | **0.94645** |
-| **Final B** | **`63126d9f`** | `rank_mean(A_LGB2 × 0.34 + [6view, rmlp, xgb5f, lgbV5] × 0.66)` | 0.946405 | **0.94649** |
-| B alternative | `b4631630` | same as Final B at ours weight 0.50 | 0.946387 | 0.94650 |
+| **Final A** | **`65554574`** | ours-only `rank_mean` of 10 lgb legs: `TEXbag, TEXF, TEX2F, PS, PSF, PS2F, PS2, PSWA, PSC, PSWC` | 0.946212 | **0.94645** |
+| **Final B** | **`37c8c37a`** | `rank_mean(A_LGB4 × 0.50 + [6view, rmlp, xgb5f, lgbV5] × 0.50)` | 0.946393 | **0.94651** |
 
-Final A (`A_LGB3`, Phase 29) ties the 6-leg `A_LGB2` on the board and is adopted on the variance
-rule: strict superset, rank-corr 0.99996, and both added legs cleared their own twin gates. Final B
-moved +0.00001 by swapping its ours side to `A_LGB2`. The weight-0.50 variant scored 0.00001 higher
-still, below near-twin resolution, so it is held as the alternative pending one bracket point (0.65).
+The ours-weight in Final B was bracketed on two ours sides (0.34 / 0.50 / 0.65 → 0.94649 / 0.94650 /
+0.94650 and 0.94650 / **0.94651** / 0.94650); 0.50 is the peak on both, and halves public exposure vs
+0.34. Both finals are strict-superset variance adoptions at tied board scores (Phase 30).
 
 ### 7.4 The decision rule
 
@@ -436,7 +436,8 @@ Apply in order:
 | Pseudo-label encoders, with the controls that make them readable | Phase 26 Z5–Z8, Phase 27 |
 | The diversity decomposition that first moved the finals | Phase 27 |
 | **The `te_pseudo` offset established at n=3** | Phase 28 |
-| **The offset at 5/5, the ours-weight probe, and the current finals** | Phase 29 |
+| **The offset at 5/5, the ours-weight probe** | Phase 29 |
+| **The offset at 7/7, the weight bracket, and the final two** | Phase 30 |
 
 Useful tools:
 
