@@ -3313,3 +3313,39 @@ and is the Final B alternative if the 0.65 bracket confirms the weight trend.
 
 **Quota note.** Slots 1 and 5 were submitted at 23:56-23:57 UTC on 09-26; slots 2-4 at 00:11-00:15 UTC
 on 09-27, so they count against the 27th's five if the reset is at UTC midnight.
+
+### Phase 30 -- the ours-weight bracket, Final B over A_LGB3, and two more te_pseudo backbones (2026-09-28/29)
+
+This covers FINDINGS.md section 7.5 points 1-3. Slots 1-2 were pre-registered there (commit `caf1d33`). The gates for
+slots 3-4 were written into each run's `notes` field *before* it was submitted, but they were not
+committed, because the 09-28 quota was expiring at 00:00 UTC. The gates for slots 5-9 are committed
+here, before any of those results exist.
+
+| slot | quota | name | recipe | twin / baseline | OOF | gate |
+|---|---|---|---|---|---|---|
+| 1 | 09-28 | `B_LGB2w65` | Final B at ours weight 0.65 | 0.34 -> 0.94649, 0.50 -> 0.94650 | 0.946354 | >=0.94651 -> weight trend real; falls -> 0.34 stands |
+| 2 | 09-28 | `B_LGB3` | Final B, ours side `A_LGB2` -> `A_LGB3` (`b972178b`) | `63126d9f` 0.94649 | 0.946409 | >=0.94649 -> adopt on variance (strict superset) |
+| 3 | 09-28 | `B_LGB3w50` | slot 2 at ours weight 0.50 | slots 2 / `b4631630` | 0.946391 | >=0.94651 -> the two moves stack, new Final B |
+| 4 | 09-28 | `B_LGB3w65` | slot 2 at ours weight 0.65 | slot 3 | 0.946357 | >=0.94652 -> trend continues; else 0.50 stands |
+| 6 | 09-28 | `TXWC` | archived `ad44e7d4`, never submitted | -- | 0.946111 | none; this is the plain-twin board point that slot 7 needs |
+| 5 | 09-29 | `PSC` | `TEXC` + `te_pseudo` (6th backbone) | strict twin `TEXC` `9daece89` (0.946101 / 0.94635); merged diff = `te_pseudo` only | kernel | LB delta > 0 -> offset n=6, leg enters `A_LGB4`; <=0 -> first counter-example |
+| 7 | 09-29 | `PSWC` | `TXWC` + `te_pseudo` (7th backbone) | strict twin `TXWC` `ad44e7d4` (0.946111 / 0.94635); merged diff = `te_pseudo` only | kernel | as slot 5 |
+| 8 | 09-29 | `A_LGB4` | `A_LGB3` + whichever of `PSC`/`PSWC` clear (rank_mean, strict superset) | Final A `b972178b` (0.94645) | after 5/7 | >=0.94648 -> new Final A; 0.94645-0.94647 -> adopt on variance (added legs are pseudo legs); lower -> keep `A_LGB3` |
+| 9 | 09-29 | `B_LGB4w50` | slot 3's recipe, ours side `A_LGB3` -> `A_LGB4` | slot 3 (0.94651) | after 8 | >=0.94651 -> adopt on variance; lower -> slot 3 stands |
+
+**Results, slots 1-4 and 6:**
+
+| slot | run_id | OOF | LB | verdict |
+|---|---|---|---|---|
+| 1 `B_LGB2w65` | `0d445cab` | 0.946354 | 0.94650 | ties 0.50; gate not met |
+| 2 `B_LGB3` | `50098ca3` | 0.946409 | **0.94650** | **clears**, +0.00001 over `63126d9f` |
+| 3 `B_LGB3w50` | `4a033e92` | 0.946391 | **0.94651** | **clears -- new best score** |
+| 4 `B_LGB3w65` | `5d14f7cb` | 0.946357 | 0.94650 | falls back; 0.50 is the peak |
+| 6 `TXWC` | `ad44e7d4` | 0.946111 | 0.94635 | plain-twin point |
+
+**The ours-weight curve is now bracketed on two ours sides.** `A_LGB2`: 0.34 / 0.50 / 0.65 score
+0.94649 / 0.94650 / 0.94650. `A_LGB3`: 0.94650 / 0.94651 / 0.94650. On both, OOF falls monotonically
+as the ours weight rises (0.946409 -> 0.946391 -> 0.946357), while the board is flat-to-rising up to
+0.50. That is the direction the `te_pseudo` offset predicts, but its size is below near-twin
+resolution. 0.50 is adopted because it is the peak on both curves, and it also halves the
+public-artifact exposure of Final B relative to 0.34, which is the risk the hedge exists for.
