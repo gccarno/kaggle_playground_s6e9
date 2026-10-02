@@ -1,19 +1,23 @@
-# Kaggle Playbook — transferable lessons from Playground S6E7 and S6E8
+# Kaggle Playbook — transferable lessons from Playground S6E7, S6E8 and S6E9
 
 **Audience:** a Claude Code instance starting a new Kaggle competition (tabular, but most of this
 generalizes). This is a *method* document, distilled from two full competition runs. Every claim
 below is backed by a number that was actually measured; the numbers are cited so you can recognize
 the same pattern rather than take the advice on faith.
 
-**The two runs this method has produced:**
+**The three runs this method has produced:**
 
-| | **S6E7** | **S6E8** |
-|---|---|---|
-| Task | 3-class balanced accuracy, 690k rows | binary ROC AUC, 691k rows, 296k test |
-| Public → private | 0.95091 → **0.95050** | 0.97060 → **0.97030** |
-| Rank | **120**, up **298** places | **675 / 3,532** (top 19.1%), up **6** places |
-| Runs logged / submissions | 41 / 38 | 89 / 18 |
-| Spearman(OOF, private LB) | 0.87 | **0.9974** |
+| | **S6E7** | **S6E8** | **S6E9** |
+|---|---|---|---|
+| Task | 3-class balanced accuracy, 690k rows | binary ROC AUC, 691k rows, 296k test | binary ROC AUC, 669k rows, 287k test |
+| Public → private | 0.95091 → **0.95050** | 0.97060 → **0.97030** | 0.94651 → **0.94549** |
+| Rank | **120**, up **298** places | **675 / 3,532** (top 19.1%), up **6** places | **230 / 3,576** (top 6.4%), up **206** places |
+| Runs logged / submissions | 41 / 38 | 89 / 18 | 199 / 110 |
+| Spearman(OOF, private LB) | 0.87 | **0.9974** | 0.974 (lgb OOF→private r 0.998, σ 0.000043) |
+
+**S6E9 in one line:** the instrument was right everywhere it measured OOF, the final selection was
+the best of all 110 submissions, and the only claims that failed on private were magnitudes read off
+the public split. See §12.
 
 S6E7's thesis was that refusing to chase the public leaderboard past the point where your own CV
 says the signal is exhausted *earns* you places in the shakeup. **S6E8 tested that and came back
@@ -527,3 +531,58 @@ refuse to fit a story to deltas below the resolution you measured, decide on day
 playing for the best model or the best score, and when the instrument says the signal is exhausted,
 stop and submit the model you can defend — sometimes that earns 298 places in the shakeup, and
 sometimes it earns six, and the method is the same either way.
+
+---
+
+## 12. What S6E9 added
+
+S6E9 is the first run where the method had a full day-one instrument, used ~5 slots/day, and
+produced a private result that could audit almost every claim. Its additions, in order of how much
+they would have changed decisions:
+
+1. **The public split is ONE draw, however many runs you score on it.** Seven `te_pseudo` twins were
+   +0.00004 to +0.00007 on public (mean +0.000061) and +0.00002 to +0.00003 on private (mean
+   +0.000024): the sign held 7/7, the size was 40%. A feature-block "LB cost" established by a Welch
+   test across 35 runs (p<0.001 on public) shrank to p=0.17 on private, and its paired twin flipped
+   sign. Correlated models scored on the same rows share that split's idiosyncrasy, so n runs give
+   n sign checks but **one** magnitude estimate. **Treat public-measured offset sizes as upper bounds,
+   and treat any effect that exists only on public, with zero OOF footprint and no mechanism, as noise
+   until shown otherwise.** This sharpens §5: it is not only small *individual* deltas that lie, but
+   *aggregates* of deltas over a shared split.
+2. **Offsets with an OOF-side mechanism held; the public-only one did not.** Family (cat, xgb),
+   fold count (10-fold optimistic), and `te_pseudo` all kept their sign on private. Each has a reason
+   rooted in how the OOF was produced. `fe_recipe_score` had none and failed. Use that as the filter:
+   *what about how this OOF was produced would make it mis-state the board?* If there is no answer,
+   there is no offset.
+3. **Public artifacts are safe when they enter as OOF matrices, not as scores.** S6E7's lesson was
+   that banked public submissions evaporate. S6E9's public-mixed final beat the ours-only final by
+   +0.00006 on both splits, because every public leg was a fold-aligned OOF+test pair with a
+   manifest (source, weight, fold count). It was then discounted for its source and fold offsets. The
+   A/B hedge (ours-only vs public-mixed) still cost nothing, because only the better final counts.
+4. **The OOF instrument reads private better than public does.** lgb OOF→private: slope 0.998,
+   residual σ 0.000043; OOF→public σ 0.000070. A gate derived from public σ is conservative by the
+   ratio of the split noises (~1.6× here). Do not loosen it mid-run, because you cannot see private,
+   but know that it is conservative.
+5. **"Price the gap before chasing it" works.** The public #1 sat +0.003 clear. A simulation priced
+   that as needing a ~1.0-log-odds feature, about the size of everything we had found combined, so we
+   did not chase it. It fell to 0.94588 private. The true gap to #1 was 0.00053, and to the top 1%
+   0.00019.
+6. **Where the effort went.** Baseline 0.94164 OOF. The income lookup (Phase 1, per-value TE) was
+   +0.0030. The representation work of Phases 14-16 (quantile buckets, digits, window encoder) was
+   another ~+0.0012. Everything after Phase 20 was about +0.0001 public and +0.00005 private. If
+   you are rationing effort: **find the column the model reads as a magnitude when it is really a
+   lookup** (playbook §7, recurring for the second time), then build representation, then stop.
+7. **Operational: key everything on run_id.** 43 of 114 paired runs had been submitted under a
+   message that differed from the logged description, one public score was mis-typed, and one
+   generic blend label matched a different submission. The post-deadline backfill
+   (`scripts/backfill_private.py`) needed three matching rules plus 8 hand resolutions. **Put the
+   run_id in every submission message**, and refuse any match whose public score disagrees.
+8. **Write the private prediction down before the reveal.** It was on the S6E9 checklist and it was
+   skipped. Without it, a post-mortem cannot separate "the instrument predicted this" from "this looks
+   right in hindsight".
+
+Checklist additions for §10:
+- [ ] Every submission message starts with the run_id.
+- [ ] Any LB-only effect (no OOF movement) is logged as *provisional* and never becomes a repo-wide rule.
+- [ ] Offsets measured on public get their **sign** promoted. Their **size** is halved for planning.
+- [ ] Before the deadline, commit a predicted private score and rank band for both finals.

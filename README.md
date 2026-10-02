@@ -5,6 +5,11 @@ decisions live here. They are not up for renegotiation mid-competition. Read thi
 model. `KAGGLE_PLAYBOOK.md` is the method document carried over from S6E7 and S6E8;
 `CLAUDE.md` is the orientation for a fresh agent session.
 
+> **FINAL (competition closed 2026-09-30): private 0.94549, rank 230 / 3,576 (top 6.4%), up 206
+> places from public 436.** Final B (`37c8c37a`, public-mixed) scored the best private result of all
+> 110 submissions; Final A (`65554574`, ours-only) scored 0.94543. The post-mortem is Phase 31 at the
+> end of §8, and its transferable lessons are in `KAGGLE_PLAYBOOK.md` §12.
+
 **`FINDINGS.md` is the overview layer over this file** — every axis tried with its verdict, the five
 measured OOF→LB offsets, the two methodological lessons that cost the most to learn, and the
 procedure for choosing the two final submissions. Start there if you are coming back cold; it indexes
@@ -3368,3 +3373,121 @@ public-artifact exposure of Final B relative to 0.34, which is the risk the hedg
 - **Final B = `37c8c37a`** (`B_LGB4w50`): `A_LGB4` x 0.50 plus `6view`/`rmlp`/`xgb5f`/`lgbV5` at
   0.125 each, 0.94651. Every public leg's weight and fold count are in its manifest.
 - A-B public gap: 0.00006. The private paired SD is 0.000055, so the hedge still costs about 1 SD.
+
+### Phase 31 -- the private reveal, and what it said about the instrument (2026-10-01)
+
+The competition closed 2026-09-30 23:59 UTC. Raw records are in `experiments/final/`:
+`submissions.csv` (all 110 submissions with public and private scores),
+`private_leaderboard.csv` (3,576 teams, paged off `kaggle competitions leaderboard --show`), and the
+public board as Kaggle exported it. Private scores are backfilled into `experiments/runs.csv` for
+all 114 paired rows by `scripts/backfill_private.py` (see "Record-keeping defects" below).
+
+**Result.**
+
+| | run_id | OOF | public | private |
+|---|---|---|---|---|
+| Final A (ours-only) | `65554574` | 0.946212 | 0.94645 | 0.94543 |
+| **Final B (public-mixed)** | **`37c8c37a`** | 0.946393 | 0.94651 | **0.94549** |
+| best private of all 110 submissions | (`37c8c37a`, tied with `4a033e92`, `5d14f7cb`) | | | 0.94549 |
+| private #1 (Chris Deotte) | -- | -- | 0.94705 | 0.94602 |
+| private #2 (Team Alicia, public #1) | -- | -- | **0.94945** | 0.94588 |
+| private top 1% / 5% / 10% | -- | -- | -- | 0.94568 / 0.94559 / 0.94544 |
+
+**Private rank 230 of 3,576 (top 6.4%), up from public rank 436: +206 places.** That is the best
+percentile of the three runs (S6E7: rank 120, +298 places; S6E8: 675/3,532, top 19.1%). The gap to
+#1 is 0.00053 and the gap to the top 1% is 0.00019.
+
+**1. The selection was optimal.** Final B is tied for the best private score among all 110
+submissions. Final A is 0.00001 below the best ours-only submission, which is inside noise. Within
+our own submissions there was no shakeup at all: private minus public is -0.000975 with SD 0.000059,
+Spearman(public, private) is 0.986, and Spearman(OOF, private) is 0.974 over 111 paired runs
+(0.961 ours-only). Inside each kind, the best-public rule picked a submission at least as good as
+the best-OOF rule. The best-OOF ours-only candidate was `99d6eaf9`, a cross-family stack at OOF
+0.946383; it scored 0.94540 against Final A's 0.94543. That is the family-offset discount working
+on the private split.
+
+**2. The public-mixed side did not collapse.** README §5's hedge existed because the 0.9465 pack
+looked like S6E7's evaporating shared-file stacks. On private, B beat A by the same margin it had
+on public at every ours side we measured: `215837d9`->`b4631630` +0.00005 public / +0.00004 private,
+`b972178b`->`4a033e92` +0.00006 / +0.00005, and `65554574`->`37c8c37a` +0.00006 / +0.00006. The
+difference from S6E7 is that every public leg here entered through an OOF matrix with an auditable
+manifest. None of them came in as a banked public score. The hedge cost nothing, because Kaggle
+scores the better of the two finals.
+
+**3. The instrument read private better than it read public.** Over the 55 paired LightGBM runs:
+
+| target | slope | r | residual SD |
+|---|---|---|---|
+| OOF -> public | 1.006 | 0.9956 | 0.000070 |
+| OOF -> **private** | **0.998** | **0.9983** | **0.000043** |
+
+The 80% split carries less noise than the 20% one, so §4's gate of +0.0000949 (derived from public
+σ) was conservative by roughly 1.6x. In the rich band (OOF >= 0.9460, n=29), public tracks private
+slightly better than OOF does (r 0.934 vs 0.891). Both are compressed there, which supports
+FINDINGS §7.4's rule of choosing between candidates by their board points.
+
+**4. The `te_pseudo` offset: the sign survived 7 of 7 times, and the size shrank to 40%.**
+
+| twin | dOOF | dPublic | dPrivate |
+|---|---|---|---|
+| TEXbag -> PS | +0.000002 | +0.00007 | +0.00003 |
+| TEXF -> PSF | +0.000022 | +0.00006 | +0.00003 |
+| TEX2F -> PS2F | -0.000005 | +0.00004 | +0.00002 |
+| TEX2 -> PS2 | -0.000004 | +0.00007 | +0.00002 |
+| TXWA -> PSWA | +0.000017 | +0.00007 | +0.00002 |
+| TEXC -> PSC | +0.000004 | +0.00005 | +0.00003 |
+| TXWC -> PSWC | +0.000019 | **+0.00007** | +0.00002 |
+| **mean** | | **+0.000061** | **+0.000024** |
+
+(The PSWC public delta was logged as +0.00005. Kaggle's record says 0.94642, not 0.94640, so the
+true delta is +0.00007. Corrected in `runs.csv`.) The mechanism is real: test-row support builds
+encoders partly for the test distribution. But all seven public deltas were measured on the **same
+57,314 public rows**, so "7 for 7" established the sign seven times and the magnitude only once. The
+public split's own idiosyncrasy is shared by every pair, so it cannot average out across pairs.
+
+**5. The `fe_recipe_score` "LB cost" did not survive.** Phases 17-18 struck it on public evidence
+alone. It was worth zero on OOF, and the case rested on a residual-group test (Welch p=0.016) and
+one paired twin. On private:
+
+| test | public | private |
+|---|---|---|
+| paired twin WQ -> WQnoRS (drop it) | **+0.00005** | **-0.00004** |
+| rich-band lgb residual, rs on (n=11) vs off (n=24) | -0.000072 vs +0.000038, p<0.001 | -0.000012 vs +0.000011, p=0.17 |
+
+The twin flipped sign and the group difference shrank by about 5x into non-significance. The
+mistake is the same one as in point 4. A Welch test over many runs treats each run as an
+independent draw of split noise, but every run was scored on the same public rows. Correlated
+models share one public draw, so n=35 runs is not n=35 samples of it. Striking the block was
+harmless, since it was worth 0 on OOF either way. **The claim that it carried a real LB cost was
+wrong.**
+
+**6. The other offsets held in sign on private.** CatBoost family (TEX->CatTEX): -0.00010 public /
+-0.00004 private. XGBoost (R0->E4r0): -0.00004 / -0.00007. Fold count (R0->X4_10fold): OOF
++0.000133, but -0.00002 private, so the 10-fold OOF was optimistic, as Phase 25 said.
+
+**7. The 0.94945 was public overfit, and Phase 26 Z3 was right not to chase it.** Team Alicia fell
+from 0.94945 public to 0.94588 private (#2). 0.0036 of their apparent edge was public-split
+fitting. Z3 concluded the gap needed "information we have no access to, or it is not
+generalisable signal", and the second branch was the true one. The real private gap from the top
+ten to us is about 0.00025-0.00050. That is several paired SDs, so genuine modelling headroom
+remained, but it was an order of magnitude smaller than the public board showed.
+
+**8. Where the +206 came from.** 463 teams (us included) scored at or above 0.94651 on public. 240 of them
+finished below us on private. Of the public top 230, 206 stayed in the private top 230; the movement
+came from the dense band just above us. This is the S6E7 mechanism again, at smaller amplitude:
+teams selecting on public deltas below the split's resolution.
+
+**Record-keeping defects found by the backfill.**
+- **43 of 114 paired rows could not be matched to their submission by description.** They were
+  submitted later under a different message ("Phase 21 slot 5: TEXC, ..."). `backfill_private.py`
+  resolves them by run_id-in-message or run_tag-as-word, and either rule also requires an equal
+  public score. Eight were resolved by hand from the OOF and leg count quoted in the message.
+  **Next time, put the run_id in every submission message.**
+- **One public score was mis-recorded:** PSWC `383cbaae`, 0.94640 -> 0.94642.
+- **One generic blend label matched the wrong submission.** `b5a318cf`'s description "logit stack,
+  8 legs, C=0.1" is also Phase 16b's stack (0.94625). Its real submission is "Phase 21 slot 1: ...
+  (b5a318cf)" at 0.94634. The public-score cross-check caught it, which is why a public mismatch is
+  now a refusal and never an overwrite.
+- FINDINGS §7.6's last checkbox asked for the predicted private outcome to be written down before
+  the reveal. **No such prediction was committed.** The post-mortem above is therefore unblinded on
+  that one point. Its other comparisons all use figures committed before the reveal.

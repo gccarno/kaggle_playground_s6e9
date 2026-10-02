@@ -1,5 +1,10 @@
 # S6E9 — what we tried, what we learned, and how to pick the final two
 
+> **FINAL RESULT (2026-10-01): private 0.94549, rank 230 / 3,576 (top 6.4%), +206 places from
+> public.** Final B was the best private score of all 110 submissions. See §10 for what the private
+> split confirmed and overturned. Two claims below are corrected there: the `te_pseudo` offset's
+> *size* (§5) and the `fe_recipe_score` LB cost (§4.1).
+
 **Audience: you, coming back to this cold.** This is the orientation layer. It summarises 27 phases
 of work, says which axes are open and which are closed *and why*, and gives the decision procedure
 for the two final submissions.
@@ -95,16 +100,16 @@ Two limits on the instrument that cost real effort to learn:
 
 ## 3. The scoreboard
 
-| model | OOF | public LB |
-|---|---|---|
-| Phase 0 raw-feature LightGBM baseline | 0.941660 | 0.94149 |
-| Best single model (`PSF`, `d07c7ab7`) | 0.946147 | 0.94643 |
-| **Final A** — ours-only (`65554574`) | 0.946212 | **0.94645** |
-| **Final B** — public-mixed (`37c8c37a`) | 0.946393 | **0.94651** |
-| #2 on the board | — | 0.94676 |
-| **#1 on the board (Team Alicia)** | — | **0.94945** |
+| model | OOF | public LB | private LB |
+|---|---|---|---|
+| Phase 0 raw-feature LightGBM baseline | 0.941660 | 0.94149 | 0.94090 |
+| Best single model (`PSF`, `d07c7ab7`) | 0.946147 | 0.94643 | 0.94541 |
+| **Final A** — ours-only (`65554574`) | 0.946212 | **0.94645** | 0.94543 |
+| **Final B** — public-mixed (`37c8c37a`) | 0.946393 | **0.94651** | **0.94549 (rank 230)** |
+| private #1 (Chris Deotte) | — | 0.94705 | 0.94602 |
+| **public #1 (Team Alicia)** | — | **0.94945** | 0.94588 (private #2) |
 
-3,016 teams. The board is brutally compressed: roughly 300 teams sit at or above our current best,
+3,576 teams at the close (3,016 when this table was first written). The board is brutally compressed: roughly 300 teams sit at or above our current best,
 so 0.00002 of score is worth dozens of places. This is exactly why rank is a terrible unit and
 paired comparisons are the only honest ones.
 
@@ -128,7 +133,7 @@ Each verdict below is a measurement, not an opinion. The phase pointer is where 
 | Pairwise interactions (all 28 among strong drivers) | **+0.000033 — crossed off** | Phase 0 |
 | Monotone constraint on income | **−0.001472** | Phase 1 |
 | `log(income)` and other monotone re-expressions | **0.000000** | Phase 1 |
-| `fe_recipe_score` (fixed-coefficient composite columns) | **struck from every recipe — worth 0 on OOF and a real LB cost** | Phase 17, 18 |
+| `fe_recipe_score` (fixed-coefficient composite columns) | struck from every recipe — worth 0 on OOF. The "real LB cost" **did not survive private** (§10) | Phase 17, 18, 31 |
 | Feature bulk generally (more columns for their own sake) | **dead** | Phase 18 |
 | Frontier's heavy-smoothing binned/paired TE recipe | rejected, three twins | Phase 2c |
 | Cross-feature / joint-key lookups | **null**, 9 keys then 10 more with a proper permutation null | Phase 1, Phase 26 Z4 |
@@ -266,8 +271,8 @@ from*. Five instances, each measured independently:
 | **Family** | cat ≈ **−0.00010**, xgb ≈ −0.00004 at matched OOF | non-LightGBM legs' OOF overstates their board value | Phase 22, confirmed Phase 27 |
 | **Source** | ≈ **−0.0001** | an OOF produced by a pipeline we did not calibrate (someone else's public artifact) sits on a *lower* line than ours | Phase 24 |
 | **Fold count** | ≈ **−0.000114** for a 5→10 fold step | a 10-fold OOF is optimistic against a 5-fold-calibrated line | Phase 25 |
-| `fe_recipe_score` | ≈ −0.00018 | a specific feature block that cost board score at zero OOF cost | Phase 17, 18 |
-| **Representation (`te_pseudo`)** | **+0.00004 to +0.00007** at matched OOF | **the first POSITIVE one, now 7 for 7** — encoders fitted with test-row support are built partly *for the test distribution*, which OOF has no way to reward | Phase 27, 28, 29 |
+| `fe_recipe_score` | ≈ −0.00018 public, **≈ 0 private** | **overturned by private (§10)**: a public-split artifact | Phase 17, 18, 31 |
+| **Representation (`te_pseudo`)** | **+0.00004 to +0.00007** public, **+0.00002 to +0.00003 private** at matched OOF | **the first POSITIVE one, now 7 for 7** — encoders fitted with test-row support are built partly *for the test distribution*, which OOF has no way to reward | Phase 27, 28, 29 |
 
 **The `te_pseudo` offset went from suggestive to established in one night.** Three independent
 backbones, three positive board deltas, at OOF deltas that were themselves flat or even negative:
@@ -465,3 +470,27 @@ python scripts/submit_run.py --fill-missing            # backfill LB scores (now
    control are what turned three suggestive effects into one real finding and two closed axes.
 5. **Burn the slots.** 5/day, no rollover, and every spent slot is a paired point that makes the next
    offline decision trustworthy.
+
+---
+
+## 10. What the private split said (Phase 31)
+
+Full numbers in `README.md` Phase 31. Raw records in `experiments/final/`.
+
+| claim made before the reveal | private verdict |
+|---|---|
+| Choose within each kind by best public score | **Confirmed.** Final B = best private of all 110 submissions. Final A is 0.00001 off the best ours-only. |
+| Discount non-lgb legs' OOF (family offset) | **Confirmed.** The best-OOF ours-only candidate (a cross-family stack) scored *below* Final A. cat −0.00004, xgb −0.00007 private. |
+| 10-fold OOF is optimistic | **Confirmed.** +0.000133 OOF, −0.00002 private. |
+| Public-mixed pack might evaporate (the reason for the hedge) | **It did not.** B − A = +0.00006 private, identical to public. The public legs entered through OOF matrices with manifests, never as banked scores. |
+| `te_pseudo` is a positive offset, 7/7 | **Sign confirmed 7/7; size 40% of public** (+0.000061 → +0.000024). |
+| `fe_recipe_score` carries a real LB cost | **Overturned.** Twin flips +0.00005 → −0.00004; group p<0.001 → p=0.17. |
+| The 0.94945 is not reachable signal; do not chase | **Confirmed.** It fell to 0.94588 private. The real gap to #1 was 0.00053. |
+| OOF instrument: slope ≈ 1, σ 0.000103 | **Better than measured.** OOF→private for lgb: slope 0.998, σ 0.000043 (public: 0.000070). The gate was ~1.6× conservative. |
+
+**The single lesson underneath both corrections:** every public-LB delta we ever measured was scored
+on the same 57,314 rows. Repeating a measurement across many correlated runs replicates its sign
+check, but **not** its magnitude, and it never gives an independent sample of the public split's
+noise. A Welch test over 35 runs scored on one split is not n=35. Public-only effects (no OOF
+mechanism) and offset *sizes* read off public pairs should be treated as upper bounds until private
+says otherwise.

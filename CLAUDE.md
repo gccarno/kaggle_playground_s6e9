@@ -9,6 +9,11 @@ Kaggle **Playground Series S6E9** ("Predicting Electric Vehicle Purchases"). Bin
 environmental concern, scored on **ROC AUC**. 668,665 train rows, 286,571 test rows, positive rate
 0.174645. **Deadline 2026-09-30.**
 
+**The competition is CLOSED.** Final: private 0.94549, rank 230 / 3,576 (top 6.4%), +206 from
+public. Final B `37c8c37a` was the best private score of all 110 submissions. The post-mortem is
+`README.md` Phase 31 / `FINDINGS.md` §10. The lessons for the next competition are
+`KAGGLE_PLAYBOOK.md` §12, which is where a new competition's repo should start.
+
 **`README.md` is the contract** — the frozen CV split, the metric, the leakage rule, the three
 measured numbers and the strategic decisions live there and are not up for renegotiation mid-
 competition. Read it before touching a model.
@@ -124,10 +129,10 @@ kaggle kernels status gcarno/s6e9-model
   In S6E8's final round, 10 of 17 probes cleared the solo gate and 0 cleared the stack gate.
 - **The gate stays unset in `README.md` §4 until the OOF↔LB residual σ has been measured** over
   ~10 paired runs. Do not invent one earlier, and do not re-derive it later from marginal LB deltas.
-- **`fe_recipe_score` is struck from every recipe (Phase 18).** The two fixed-coefficient
-  `buy_score`/`worry_score` columns are worth nothing on OOF at any feature count and cost real
-  LB at every one: rich rs=True runs average residual −0.00018, rich rs=False −0.00007 (Welch
-  p=0.016), and the paired single-field twin (WQ→WQnoRS) is +0.00005 LB at −0.000002 OOF.
+- **`fe_recipe_score` is struck from every recipe (Phase 18)**, because it is worth nothing on OOF.
+  The public-LB "cost" that justified it (Welch p=0.016, twin WQ→WQnoRS +0.00005) **did not survive
+  private** (twin −0.00004, group p=0.17; Phase 31). It was public-split noise, so do not cite it as
+  an LB offset.
   Likewise `te_shape_cols` is superseded by `te_window_cols` and redundant on top of it — the
   champion `WQ2` carries neither.
 - **Burn the daily submission slots.** 5/day, no rollover. Each spent slot is a paired OOF↔LB point,
